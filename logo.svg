@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 520" role="img" aria-label="बसaarah logo">
+  <!-- Logo 3 — amber side-view bus over the wordmark. Wordmark is real text: render in Baloo 2 (800). -->
+  <!-- bus side profile -->
+  <path d="M168 150 Q168 118 200 118 L418 118 Q452 118 466 148 L478 176 Q486 192 486 210 L486 252 Q486 268 470 268 L184 268 Q168 268 168 252 Z" fill="#F6A609"/>
+  <!-- window band: windows + windshield -->
+  <rect x="190" y="136" width="62" height="46" rx="9" fill="#141414"/>
+  <rect x="264" y="136" width="62" height="46" rx="9" fill="#141414"/>
+  <rect x="338" y="136" width="62" height="46" rx="9" fill="#141414"/>
+  <path d="M412 136 L438 136 Q452 136 460 154 L468 174 Q470 182 462 182 L412 182 Z" fill="#141414"/>
+  <!-- headlight -->
+  <circle cx="470" cy="226" r="8" fill="#141414"/>
+  <!-- wheels -->
+  <circle cx="238" cy="272" r="21" fill="#141414"/>
+  <circle cx="404" cy="272" r="21" fill="#141414"/>
+  <!-- wordmark -->
+  <text x="320" y="448" text-anchor="middle" font-family="'Baloo 2','Noto Sans Devanagari',sans-serif" font-weight="800" font-size="96" fill="#111111">बसaarah</text>
+</svg>

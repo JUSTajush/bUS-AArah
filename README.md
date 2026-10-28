@@ -1,3 +1,5 @@
+<p align="center"><img src="logo.svg" alt="बसaarah logo" width="300"></p>
+
 # बसaarah
 
 **बसaarah** (Smart College Bus Tracking and Availability System) is a map-first bus tracking web app for **ARKA JAIN University (AJU), Jamshedpur** students — built to answer one question at any bus stop: *has my bus already passed, or is it still coming?*
