@@ -793,12 +793,12 @@ h1.title em{font-style:normal;background:#000;color:#fff;padding:0 10px;border-r
 .mapside-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
 .mapside-title{font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 .mapside-close{flex:none;width:30px;height:30px;border-radius:50%;border:0;background:var(--surface2);color:var(--ink);font-size:14px;font-weight:800;cursor:pointer;display:grid;place-items:center;line-height:1}
-#stopsBtn{position:absolute;top:64px;right:14px;z-index:30;display:inline-flex;align-items:center;gap:8px;background:#000;color:#fff;border:0;border-radius:999px;padding:10px 16px;font-size:13px;font-weight:800;cursor:pointer;box-shadow:0 6px 16px rgba(0,0,0,.35)}
+#stopsBtn{position:absolute;top:64px;right:14px;z-index:30;display:inline-flex;align-items:center;gap:8px;background:#000;color:#fff;border:0;border-radius:999px;padding:10px 16px;font-size:13px;font-weight:800;cursor:pointer;box-shadow:0 6px 16px rgba(0,0,0,.35);transition:top .22s ease}
 #stopsBtn svg{fill:#fff;display:block}
 #stopsBtn:active{transform:scale(.96)}
 @media(prefers-color-scheme:dark){#stopsBtn{background:#f4f4f2;color:#000}#stopsBtn svg{fill:#000}}
 @media(min-width:901px) and (max-width:1100px){#stopsBtn{top:auto;bottom:196px}}
-@media(prefers-reduced-motion:reduce){#mapside.open{animation:none}}
+@media(prefers-reduced-motion:reduce){#mapside.open{animation:none}#stopsBtn{transition:none}}
 .mstop{display:flex;gap:8px;align-items:flex-start;padding:6px 4px;border-radius:8px;font-size:12.5px}
 .mstop[data-pin]{cursor:pointer}.mstop[data-pin]:hover{background:var(--surface2)}
 .mstop .mdot{width:10px;height:10px;border-radius:50%;border:2.5px solid #0b0b0c;background:var(--surface);flex-shrink:0;margin-top:4px}
@@ -1417,6 +1417,67 @@ function splitLine(linePts,pos){
   const splitLL=unproj(bsx,bsy);
   return {done:linePts.slice(0,bi+1).concat([splitLL]), todo:[splitLL].concat(linePts.slice(bi+1))};
 }
+// Student-view line semantics are judged from the SELECTED stop, not
+// just from the bus: grey = travelled/passed for a student at that stop,
+// black = still to come to that stop. Once the selected route's bus has
+// passed the selected stop, nothing more is coming on that route/trip
+// to that stop, so the whole line must read as travelled — even though
+// the bus itself keeps travelling on to Campus. Uses the same live-time
+// rule as the stop pins in the student view (live time <= now = passed).
+// Student view only: the Driver view keeps splitting at the bus, since
+// the driver cares about the remaining route to Campus.
+function selectedStopPassed(route,stops){
+  const list=stops||routeStops(route);
+  const sel=list.find(s=>canon(s.n)===canon(state.stopName));
+  if(!sel) return false;
+  const lt=liveTime(route,sel);
+  return lt!==null&&lt<=simMin();
+}
+// Like splitLine, but when the bus's position lies on (or within a
+// couple of pixels of) more than one segment — the route retraces the
+// same campus access road at both ends, out and back, so a position on
+// that shared stretch matches an early segment AND a late one — pick
+// the LAST such segment. Used for the passed state below, where the
+// bus is by definition on its way back toward Campus; splitLine's
+// first-nearest match would otherwise sometimes split at the outbound
+// copy of the shared road and paint almost the whole line as "tail".
+function splitLineLast(linePts,pos){
+  if(!pos) return {done:null,todo:linePts};
+  const linePx=linePts.map(p=>proj(p[0],p[1]));
+  const bp=proj(pos.lat,pos.lon);
+  const ds=[];
+  let bd=Infinity;
+  for(let i=0;i<linePx.length-1;i++){
+    const a=linePx[i], b=linePx[i+1];
+    const dx=b[0]-a[0], dy=b[1]-a[1], L2=dx*dx+dy*dy||1;
+    let t=((bp[0]-a[0])*dx+(bp[1]-a[1])*dy)/L2; t=Math.max(0,Math.min(1,t));
+    const qx=a[0]+t*dx, qy=a[1]+t*dy, d=(bp[0]-qx)*(bp[0]-qx)+(bp[1]-qy)*(bp[1]-qy);
+    ds.push({i:i,t:t,d:d}); if(d<bd) bd=d;
+  }
+  let pick=ds[0];
+  ds.forEach(c=>{ if(c.d<=bd+4) pick=c; });
+  const a=linePx[pick.i], b=linePx[pick.i+1];
+  const splitLL=unproj(a[0]+pick.t*(b[0]-a[0]), a[1]+pick.t*(b[1]-a[1]));
+  return {done:linePts.slice(0,pick.i+1).concat([splitLL]), todo:[splitLL].concat(linePts.slice(pick.i+1))};
+}
+// Three-state student line, judged from the selected stop: solid black
+// is reserved for "still coming to your stop" only. Before the bus
+// reaches the stop: light grey behind the bus, black ahead of it. After
+// it passes the stop but is still travelling to Campus: light grey
+// behind the bus and the remaining road in a darker muted grey
+// (#6d6d72 — the site's --muted tone) — never black, because nothing is
+// coming to the student's stop any more. Once the trip ends at Campus
+// the whole line is the light travelled grey.
+function lineParts(route,stops,linePts,pos){
+  if(!selectedStopPassed(route,stops)){
+    const sp=splitLine(linePts,pos);
+    return {done:sp.done,tail:null,todo:sp.todo};
+  }
+  const tripDone=!pos||/^Completed/.test(pos.status||"");
+  if(tripDone) return {done:linePts.slice(),tail:null,todo:[]};
+  const sp=splitLineLast(linePts,pos);
+  return {done:sp.done,tail:sp.todo,todo:[]};
+}
 function pinHTML(s){
   if(s==="campus") return "<b>Gamaharia Campus</b><br>Every trip starts and ends here";
   return "<b>"+esc(s.n)+"</b>"+(s.request?"<br>Request stop — bus stops if a student is waiting":"")+"<br>Chart time: "+(s.t[state.trip]||(s.request?"— (no printed time)":"—"));
@@ -1609,7 +1670,7 @@ function makeBase(holder,onImgErr){
 // zoom by the student is never reset by a refresh. The home view is
 // fitted only when the route/stop/trip selection changes (fitKey), on
 // first show, and when the locate (◎) button clears fitKey.
-const S={map:null,holder:{map:null},base:null,halo:null,done:null,todo:null,itc:null,stopLayer:null,stopsKey:"",pinMarkers:[],selBus:null,selBusHtml:"",others:{},yourPin:null,fitKey:"",sizeW:0,sizeH:0,wasHidden:false};
+const S={map:null,holder:{map:null},base:null,halo:null,done:null,tail:null,todo:null,itc:null,stopLayer:null,stopsKey:"",pinMarkers:[],selBus:null,selBusHtml:"",others:{},yourPin:null,fitKey:"",sizeW:0,sizeH:0,wasHidden:false};
 function selBusIcon(html){ return L.divIcon({className:"lf-div",html:html,iconSize:[92,88],iconAnchor:[46,84]}); }
 function selBusHtml(routeId){ return '<div class="busmark-lf"><span class="busnum-chip">'+esc(state.allot[routeId])+'</span><span class="busbadge"><span class="buspulse"></span>'+BUS_SVG_23+'</span><span class="busdot"></span></div>'; }
 function otherBusIcon(b){
@@ -1624,11 +1685,38 @@ function initStudentMap(){
   S.map.addLayer(S.base.live);
   L.control.zoom({position:"bottomright"}).addTo(S.map);
   L.control.layers(S.base.bases,null,{position:"topright"}).addTo(S.map);
+  watchLayersMenu();
   S.halo=L.polyline([],{color:"#ffffff",weight:9,opacity:.8}).addTo(S.map);
   S.done=L.polyline([],{color:"#b9bdc2",weight:4.5}).addTo(S.map);
+  S.tail=L.polyline([],{color:"#6d6d72",weight:4.5}).addTo(S.map);
   S.todo=L.polyline([],{color:"#0b0b0c",weight:4.5}).addTo(S.map);
   S.itc=L.layerGroup().addTo(S.map);
   S.stopLayer=L.layerGroup().addTo(S.map);
+}
+// The expanded layers menu hangs down the top-right corner INSIDE the
+// map, while the "Stops on this route" pill floats in the same corner
+// ABOVE the map — so with the menu open, the pill covered the menu's
+// lower rows (Satellite / Offline map) and they could not be tapped.
+// While the menu is expanded, drop the pill to just below the menu's
+// measured bottom edge; restore its usual spot when the menu collapses.
+// (At 901–1100px wide the pill is anchored to the bottom of the stage
+// instead, far from the menu, so it is left alone there.)
+function watchLayersMenu(){
+  const btn=$("stopsBtn"); if(!btn||!S.map) return;
+  const ctl=S.map.getContainer().querySelector(".leaflet-control-layers");
+  if(!ctl) return;
+  const place=()=>{
+    const open=ctl.classList.contains("leaflet-control-layers-expanded");
+    const bottomAnchored=window.matchMedia("(min-width:901px) and (max-width:1100px)").matches;
+    if(!open||bottomAnchored){ btn.style.top=""; return; }
+    requestAnimationFrame(()=>{
+      if(!ctl.classList.contains("leaflet-control-layers-expanded")) return;
+      const host=$("mapflex").getBoundingClientRect(), c=ctl.getBoundingClientRect();
+      btn.style.top=Math.max(64,Math.round(c.bottom-host.top)+10)+"px";
+    });
+  };
+  new MutationObserver(place).observe(ctl,{attributes:true,attributeFilter:["class"]});
+  window.addEventListener("resize",place);
 }
 function syncStudentMap(route,stops,pinned,linePts,pos){
   initStudentMap();
@@ -1637,11 +1725,16 @@ function syncStudentMap(route,stops,pinned,linePts,pos){
   if(!cw||!ch) S.wasHidden=true;
   else if(S.wasHidden||cw!==S.sizeW||ch!==S.sizeH){ S.sizeW=cw; S.sizeH=ch; S.wasHidden=false; S.map.invalidateSize(); }
   const now=simMin();
-  // Route line: white halo, grey travelled part, black remaining part.
-  const sp=splitLine(linePts,pos);
+  // Route line: white halo, then the three-state split from lineParts —
+  // light grey travelled, black only while the bus is still coming to
+  // the selected stop, darker muted grey for the road the bus still has
+  // to Campus after it has passed that stop, all light grey once the
+  // trip ends.
+  const sp=lineParts(route,stops,linePts,pos);
   S.halo.setLatLngs(linePts);
   S.done.setLatLngs(sp.done||[]);
-  S.todo.setLatLngs(sp.todo);
+  S.tail.setLatLngs(sp.tail||[]);
+  S.todo.setLatLngs(sp.todo||[]);
   // Live positions of every OTHER bus serving the selected stop — same
   // busesAtStop/busPosition/simulated clock as everything else.
   const others=[];
@@ -1759,7 +1852,15 @@ function drawSchematic(route,stops,pinned,linePts,pos){
   const mnLa=Math.min(...lats),mxLa=Math.max(...lats),mnLo=Math.min(...lons),mxLo=Math.max(...lons);
   const X=lo=>40+(lo-mnLo)/((mxLo-mnLo)||1)*720, Y=la=>480-(la-mnLa)/((mxLa-mnLa)||1)*440;
   let h='<text x="40" y="24" font-size="14" font-weight="700" fill="currentColor">Route schematic — fallback view (plotted from real coordinates)</text>';
-  h+='<polyline fill="none" stroke="#0b0b0c" stroke-width="3" points="'+linePts.map(p=>X(p[1])+","+Y(p[0])).join(" ")+'"/>';
+  // Same three-state student rule as the Leaflet map (lineParts):
+  // light grey travelled, black only while the bus is still coming to
+  // the selected stop, darker muted grey for the road left to Campus
+  // after it has passed that stop, all light grey once the trip ends.
+  const lp=lineParts(route,stops,linePts,pos);
+  const pts=a=>a?a.map(p=>X(p[1])+","+Y(p[0])).join(" "):"";
+  if(lp.done&&lp.done.length>1) h+='<polyline fill="none" stroke="#b9bdc2" stroke-width="3" points="'+pts(lp.done)+'"/>';
+  if(lp.tail&&lp.tail.length>1) h+='<polyline fill="none" stroke="#6d6d72" stroke-width="3" points="'+pts(lp.tail)+'"/>';
+  if(lp.todo&&lp.todo.length>1) h+='<polyline fill="none" stroke="#0b0b0c" stroke-width="3" points="'+pts(lp.todo)+'"/>';
   h+='<circle cx="'+X(CAMPUS.lon)+'" cy="'+Y(CAMPUS.lat)+'" r="7" fill="#0b0b0c"/><text x="'+(X(CAMPUS.lon)+10)+'" y="'+(Y(CAMPUS.lat)+4)+'" font-size="12" fill="currentColor">Gamaharia Campus</text>';
   pinned.forEach(s=>{if(s.n==="Gamaharia Campus")return;const mine=canon(s.n)===canon(state.stopName);h+='<circle cx="'+X(s.lon)+'" cy="'+Y(s.lat)+'" r="'+(mine?8:5)+'" fill="'+(mine?"#0b0b0c":"#fff")+'" stroke="#0b0b0c" stroke-width="2.5"/><text x="'+(X(s.lon)+9)+'" y="'+(Y(s.lat)+4)+'" font-size="11" fill="currentColor">'+esc(s.n)+'</text>'});
   const icS=computeIntercept(), myS=myStopCoords();
