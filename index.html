@@ -907,11 +907,11 @@ h1.title em{font-style:normal;background:#000;color:#fff;padding:0 10px;border-r
 .buspulse::after{content:"";position:absolute;inset:19px;border-radius:50%;background:rgba(0,0,0,.13)}
 @keyframes buspulse{0%{transform:translate(-50%,-50%) scale(.55);opacity:.9}70%{transform:translate(-50%,-50%) scale(1.15);opacity:.25}100%{transform:translate(-50%,-50%) scale(1.3);opacity:0}}
 @media(prefers-reduced-motion:reduce){.buspulse{animation:none;opacity:.5}.dot{animation:none}}
-.leaflet-div-icon .busmark2{display:flex;flex-direction:column;align-items:center;gap:2px;pointer-events:none}
+.busmark2{display:flex;flex-direction:column;align-items:center;gap:2px;pointer-events:none}
 .busmark2 .bm-num{background:#0b0b0c;color:#fff;border:1.5px solid #fff;border-radius:999px;padding:2px 8px;font-size:10.5px;font-weight:800;line-height:1.25;white-space:nowrap;box-shadow:0 4px 10px rgba(0,0,0,.35)}
 .busmark2 .bm-ic{width:31px;height:31px;border-radius:50%;background:#fff;border:2px solid #0b0b0c;display:grid;place-items:center;box-shadow:0 5px 12px rgba(0,0,0,.35)}
 .busmark2 .bm-ic svg{fill:#0b0b0c;display:block}
-.busmark2 .bm-dot{width:7px;height:7px;border-radius:50%;background:#0b0b0c;border:1.5px solid #fff;box-shadow:0 2px 4px rgba(0,0,0,.35)}
+.busmark2 .bm-dot{flex:none;display:block;width:7px;height:7px;border-radius:50%;background:#0b0b0c;border:1.5px solid #fff;box-shadow:0 2px 4px rgba(0,0,0,.35)}
 .busmark2.passed .bm-num{background:#83838a}
 .busmark2.passed .bm-ic{background:#e6e6e2;border-color:#b9b9be}
 .busmark2.passed .bm-ic svg{fill:#83838a}
