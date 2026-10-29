@@ -4,6 +4,24 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
 <meta name="color-scheme" content="light dark"/>
+<script>
+/* Paint-time gate lock — runs synchronously in <head>, before the first
+   frame can paint. It mirrors the session check in the auth block at the
+   bottom of this file (same storage keys, same rule: "__admin__" or an
+   email present in basaarah_users) and stamps <html> with pre-gate or
+   pre-app. The CSS then keeps the app chrome display:none from frame one
+   when logged out, instead of the end-of-body script having to catch up
+   and hide an already-painted app — that catch-up window was the
+   split-second flash of the tracker behind the login gate. Any storage
+   error fails safe to the gate, exactly like getSession()/findUser(). */
+(function(){try{
+  var s=(localStorage.getItem("basaarah_session")||"").trim().toLowerCase(), ok=false;
+  if(s==="__admin__") ok=true;
+  else if(s){ var u=JSON.parse(localStorage.getItem("basaarah_users")||"[]");
+    if(Array.isArray(u)) for(var i=0;i<u.length;i++){ if(u[i]&&u[i].email===s){ ok=true; break; } } }
+  document.documentElement.classList.add(ok?"pre-app":"pre-gate");
+}catch(e){ document.documentElement.classList.add("pre-gate"); }})();
+</script>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2064%2064%27%3E%3Crect%20width%3D%2764%27%20height%3D%2764%27%20rx%3D%2714%27%20fill%3D%27%23111113%27%2F%3E%3Cg%20transform%3D%27translate%285%2017%29%20scale%280.96%29%27%3E%3Cpath%20d%3D%22M10%204h32c4.2%200%207.9%202.6%209.4%206.4l1.3%203.4c.4%201%20.6%202.1.6%203.2v4.5c0%201.4-1.1%202.5-2.5%202.5H5.5C4.1%2024%203%2022.9%203%2021.5V9C3%206.2%205.2%204%2010%204Z%22%20fill%3D%22%23f5a623%22%2F%3E%3Crect%20x%3D%227%22%20y%3D%227.5%22%20width%3D%228%22%20height%3D%227%22%20rx%3D%221.8%22%20fill%3D%22%23161617%22%2F%3E%3Crect%20x%3D%2217%22%20y%3D%227.5%22%20width%3D%228%22%20height%3D%227%22%20rx%3D%221.8%22%20fill%3D%22%23161617%22%2F%3E%3Crect%20x%3D%2227%22%20y%3D%227.5%22%20width%3D%228%22%20height%3D%227%22%20rx%3D%221.8%22%20fill%3D%22%23161617%22%2F%3E%3Cpath%20d%3D%22M38%207.5h3c2%200%203.9%201.2%204.7%203.1l1.2%203.9H38Z%22%20fill%3D%22%23161617%22%2F%3E%3Ccircle%20cx%3D%2250.6%22%20cy%3D%2219.8%22%20r%3D%221.6%22%20fill%3D%22%23161617%22%2F%3E%3Ccircle%20cx%3D%2214%22%20cy%3D%2224%22%20r%3D%225%22%20fill%3D%22%23111113%22%2F%3E%3Ccircle%20cx%3D%2242%22%20cy%3D%2224%22%20r%3D%225%22%20fill%3D%22%23111113%22%2F%3E%3Ccircle%20cx%3D%2214%22%20cy%3D%2224%22%20r%3D%223.5%22%20fill%3D%22%23141414%22%2F%3E%3Ccircle%20cx%3D%2242%22%20cy%3D%2224%22%20r%3D%223.5%22%20fill%3D%22%23141414%22%2F%3E%3Ccircle%20cx%3D%2214%22%20cy%3D%2224%22%20r%3D%221.3%22%20fill%3D%22%23f5a623%22%2F%3E%3Ccircle%20cx%3D%2242%22%20cy%3D%2224%22%20r%3D%221.3%22%20fill%3D%22%23f5a623%22%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E">
 <title>बसaarah — ARKA JAIN University Bus Tracking & Availability</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -681,18 +699,26 @@ button,select,input{font:inherit}h1,h2,h3{font-family:"Archivo",sans-serif;lette
 .brand{display:flex;gap:10px;align-items:center}.logo{display:flex;align-items:center;flex:none;line-height:0}
 .logo svg{display:block}
 .brand b{font-family:"Baloo 2","Archivo",sans-serif;font-size:19px;font-weight:800;display:block;line-height:1.15;letter-spacing:0}.brand span{font-size:12px;color:var(--muted);font-weight:500}
-.pill{display:inline-flex;align-items:center;gap:7px;background:var(--surface);border:1.5px solid var(--ink);color:var(--ink);padding:6px 12px;border-radius:999px;font-size:12.5px;font-weight:700}
-.dot{width:8px;height:8px;background:var(--accent);border-radius:50%;animation:pulse-dot 1.6s infinite}@keyframes pulse-dot{50%{opacity:.35}}
+.headclock{font-size:13px;font-weight:700;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
 .wrap{max-width:1400px;margin:0 auto;padding:20px 18px 36px}
 /* ---------- auth gate (demo, client-side) ---------- */
 .auth-area{position:relative;flex:none}
 .user-chip{display:flex;align-items:center;gap:8px;background:var(--surface2);border:0;padding:5px 14px 5px 5px;border-radius:999px;font-weight:800;cursor:pointer;color:var(--ink);font-size:14px}
 .avatar{width:30px;height:30px;border-radius:50%;background:#f5a623;color:#161617;display:grid;place-items:center;font-weight:900;font-size:14px;flex:none}
-.user-menu{position:absolute;top:calc(100% + 8px);right:0;min-width:210px;background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:0 18px 44px rgba(0,0,0,.24);padding:8px;z-index:950}
+.user-menu{position:absolute;top:calc(100% + 8px);right:0;min-width:210px;max-width:calc(100vw - 24px);background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:0 18px 44px rgba(0,0,0,.24);padding:8px;z-index:950}
 .user-menu-stop{font-size:12.5px;color:var(--muted);font-weight:600;padding:6px 10px 8px;border-bottom:1px solid var(--line);margin-bottom:6px}
 .user-menu-item{display:block;width:100%;text-align:left;background:transparent;border:0;padding:10px;border-radius:10px;font-weight:700;cursor:pointer;color:var(--ink)}
 .user-menu-item:hover{background:var(--surface2)}
-body.auth-open .topbar,body.auth-open .wrap{display:none}
+body.auth-open .topbar,body.auth-open .wrap{display:none!important}
+/* Paint-time lock (class set by the <head> script before first paint):
+   while logged out the app is unpaintable from the very first frame —
+   not at startup, not on a timer tick, resize or map init — and the gate
+   itself is up from frame one. While a valid session exists the gate can
+   never flash either. showGate()/hideGate() keep these classes in sync
+   with the runtime state after login / logout. */
+html.pre-gate .topbar,html.pre-gate .wrap{display:none!important}
+html.pre-gate #authView{display:block}
+html.pre-app #authView{display:none!important}
 #authView{min-height:100dvh;background:#e7e7ea}
 #gateMain[hidden],#gateAdmin[hidden]{display:none!important}
 /* ---------- auth gate: app-style (bright white column on soft grey) ---------- */
@@ -823,8 +849,13 @@ body.is-admin #view-admin{margin-top:2px}
 .csel-btn-adm{border:1px solid var(--line);background-color:var(--surface);padding-top:10px;padding-bottom:10px}
 .csel-lbl{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 @media(prefers-color-scheme:dark){.csel-btn{background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24'><path fill='%23b6b6bb' d='M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z'/></svg>")}}
-.csel-pop{position:absolute;top:calc(100% + 6px);left:0;width:100%;min-width:min(260px,86vw);z-index:80;background:var(--surface);border:1px solid var(--line);border-radius:18px;box-shadow:0 18px 44px rgba(0,0,0,.24);padding:6px;animation:cselIn .16s ease}
-.csel-inline .csel-pop{width:max-content;max-width:86vw}
+/* The panel is additionally clamped into the viewport by clampPop() in
+   enhanceSelect() every time it opens: CSS alone cannot know where the
+   control sits on a narrow screen, and an unclamped min-width / max-content
+   panel anchored at left:0 can spill past the right edge (or, for the
+   right-anchored user menu, the left edge) and clip its rows. */
+.csel-pop{position:absolute;top:calc(100% + 6px);left:0;width:100%;min-width:min(260px,calc(100vw - 16px));max-width:calc(100vw - 16px);z-index:80;background:var(--surface);border:1px solid var(--line);border-radius:18px;box-shadow:0 18px 44px rgba(0,0,0,.24);padding:6px;animation:cselIn .16s ease}
+.csel-inline .csel-pop{width:max-content;max-width:calc(100vw - 16px)}
 @keyframes cselIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
 @media(prefers-reduced-motion:reduce){.csel-pop{animation:none}}
 .csel-search{display:block;width:100%;padding:9px 13px;margin:2px 0 6px;border:0;border-radius:999px;background:var(--surface2);color:var(--ink);font-weight:600}
@@ -1065,13 +1096,81 @@ select.admsel{padding:10px 14px;border-radius:999px;border:1px solid var(--line)
  #locateBtn{right:12px}
  #busLegend{right:70px;bottom:140px}
 }
+/* ---------- phone declutter (≤640px, student-first) ----------
+   Same content, same features — just a tighter stack so the map starts
+   higher and reads as the main event on a phone: slimmer shared header,
+   compact hero, tighter controls card, taller map, and breathing room
+   in the sheet below it. Desktop (>640px) is untouched by this block.
+   Interactive targets stay ≥40px tall. */
+@media(max-width:640px){
+ .wrap{padding:12px 12px 26px}
+ /* Slim shared header (all roles): smaller brand, chips and avatar. */
+ .topbar{padding:7px 12px;gap:6px 8px}
+ .brand{gap:8px}
+ .brand .logo svg{width:32px;height:auto}
+ .brand b{font-size:16px}
+ .brand span{font-size:10.5px}
+ .headclock{font-size:12px}
+ .user-chip{font-size:13px;padding:4px 11px 4px 4px}
+ .avatar{width:26px;height:26px;font-size:12px}
+ /* Compact hero: same words, one tight treatment. */
+ h1.title{font-size:23px;line-height:1.12;margin-top:2px}
+ h1.title em{padding:0 7px;border-radius:6px}
+ .lede{font-size:13.5px;line-height:1.45;margin-top:8px}
+ /* Tighter controls card: same four groups, compact rows. */
+ #controlsHome{margin-top:12px}
+ #controlsBar{padding:10px 12px;gap:8px 10px;border-radius:18px}
+ #controlsBar label{font-size:10px}
+ .cb-group{gap:4px}
+ .cb-stop{gap:9px}
+ .pin-ic{width:30px;height:30px}
+ #controlsBar .csel-btn{padding:10px 30px 10px 12px;font-size:14px}
+ #controlsBar .hint{font-size:11px}
+ .trips{padding:3px}
+ .trip{padding:9px 11px;font-size:13.5px}
+ .btn-ghost{padding:10px 14px;font-size:13.5px}
+ .geonote{font-size:11px}
+ /* Map stage: starts higher, taller, controls tucked in. */
+ .stagewrap{margin-top:12px}
+ #stageControls{margin:0 4px 8px}
+ #map{height:62vh;min-height:380px;border-radius:20px}
+ #stopsBtn{top:54px;right:10px;padding:10px 14px;font-size:12.5px}
+ #locateBtn{width:44px;height:44px;right:10px}
+ #busLegend{right:62px;bottom:126px;font-size:11.5px;padding:6px 11px}
+ /* Sheet below the map: the earliest-bus answer stays prominent,
+    everything else gets consistent, smaller breathing room. */
+ .sheet{margin:-16px 4px 0;padding:10px 16px 16px;border-radius:22px}
+ .sheet .handle{margin-bottom:10px}
+ .earliest{padding:12px 14px;margin-bottom:12px;border-radius:16px}
+ .earliest-main{font-size:17px}
+ .earliest-sub{font-size:12.5px}
+ .intercept{padding:12px 14px;margin-bottom:12px;border-radius:16px}
+ .intercept-main{font-size:16px}
+ .intercept-sub{font-size:12.5px}
+ .sentence{font-size:19px;line-height:1.22}
+ .statusline{font-size:13.5px;margin-top:6px}
+ #view-student .sheet h3{margin-top:12px!important;font-size:15px}
+ /* Stat chips: one compact row of four equal cells (text may wrap
+    inside a cell; the row itself never scrolls sideways). */
+ .sumchips{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:8px;flex-wrap:nowrap}
+ .sumchip{padding:6px 4px;font-size:11.5px;text-align:center;white-space:normal;line-height:1.3;border-radius:12px}
+ .sheetsec{margin-top:12px;padding-top:12px}
+ .expander{padding:11px 13px;font-size:14px;border-radius:12px}
+ .decision{padding:12px 13px;margin-top:10px;border-radius:16px}
+ .decision .dic{width:34px;height:34px}
+ .mapcap{margin-top:10px;font-size:14px}
+ #view-student .belowgrid{margin-top:12px;gap:12px}
+ #view-student .card{padding:14px}
+ .rowitem{padding:10px 11px}
+ .ttrow{padding:8px 0}
+}
 </style>
 </head>
 <body>
 <header class="topbar">
   <div class="brand"><div class="logo" role="img" aria-label="बसaarah logo"><svg width="40" height="23" viewBox="0 0 56 32" aria-hidden="true"><path d="M10 4h32c4.2 0 7.9 2.6 9.4 6.4l1.3 3.4c.4 1 .6 2.1.6 3.2v4.5c0 1.4-1.1 2.5-2.5 2.5H5.5C4.1 24 3 22.9 3 21.5V9C3 6.2 5.2 4 10 4Z" fill="#f5a623"/><rect x="7" y="7.5" width="8" height="7" rx="1.8" fill="#161617"/><rect x="17" y="7.5" width="8" height="7" rx="1.8" fill="#161617"/><rect x="27" y="7.5" width="8" height="7" rx="1.8" fill="#161617"/><path d="M38 7.5h3c2 0 3.9 1.2 4.7 3.1l1.2 3.9H38Z" fill="#161617"/><circle cx="50.6" cy="19.8" r="1.6" fill="#161617"/><circle cx="14" cy="24" r="5" fill="var(--surface)"/><circle cx="42" cy="24" r="5" fill="var(--surface)"/><circle cx="14" cy="24" r="3.5" fill="#141414"/><circle cx="42" cy="24" r="3.5" fill="#141414"/><circle cx="14" cy="24" r="1.3" fill="#f5a623"/><circle cx="42" cy="24" r="1.3" fill="#f5a623"/></svg></div><div><b>बसaarah</b><span>ARKA JAIN University • Gamharia Campus</span></div></div>
   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-    <span class="pill"><span class="dot"></span> SIMULATED LIVE TRACKING • <span id="clock">--:--</span></span>
+    <span class="headclock" id="clock">--:--</span>
     <div class="auth-area">
       <div class="auth-user" id="authUser" hidden>
         <button id="userChip" type="button" class="user-chip" aria-haspopup="true" aria-expanded="false"><span class="avatar" id="userAvatar" aria-hidden="true">?</span><span id="userName"></span></button>
@@ -2085,13 +2184,63 @@ function syncStudentMap(route,stops,pinned,linePts,pos){
   rowsOut.push('<div class="mstop"><div class="mdot campus"></div><div><b>Gamaharia Campus</b><span>Trip ends'+(last&&last.t[state.trip]?(" • chart "+last.t[state.trip]):"")+'</span></div></div>');
   $("mapStops").innerHTML=rowsOut.join("");
   // Home fit — only on selection change / first show / locate button.
+  // Refresh ticks never re-fit (fitKey is unchanged), so a student's
+  // manual pan/zoom is never fought.
   const key=route.id+"|"+state.stopName+"|"+state.trip;
   if(S.fitKey!==key&&cw&&ch){
     S.fitKey=key;
-    const pts=linePts.concat(others.map(o=>[o.p.lat,o.p.lon]));
-    if(icpt) pts.push([icpt.stop.lat,icpt.stop.lon]);
     const wide=cw>900;
-    S.map.fitBounds(L.latLngBounds(pts),{paddingTopLeft:wide?[492,168]:[24,24],paddingBottomRight:wide?[92,44]:[24,24],maxZoom:16,animate:false});
+    if(wide){
+      // Desktop: whole-route framing beside the floating sheet, as before.
+      const pts=linePts.concat(others.map(o=>[o.p.lat,o.p.lon]));
+      if(icpt) pts.push([icpt.stop.lat,icpt.stop.lon]);
+      S.map.fitBounds(L.latLngBounds(pts),{paddingTopLeft:[492,168],paddingBottomRight:[92,44],maxZoom:16,animate:false});
+    } else {
+      // Phone/tablet: frame what matters — your stop, the buses coming
+      // to it, Campus, and the intercept target when there is one — at
+      // street level (zoom capped at 15). Fitting the WHOLE route here
+      // opened the map at district scale (Purulia/Chandil visible) and
+      // forced a long pinch-zoom in before the stop or bus was legible.
+      // The extent only goes district-wide when those points genuinely
+      // span it (e.g. a far first stop with the bus still at Campus).
+      // Core frame: your stop + the selected route's bus. Optional
+      // points — the next bus still coming to this stop on another
+      // route, and the intercept target — join the frame only while
+      // the fit stays at street level (zoom ≥ 12): early in a trip
+      // every bus is still kilometres out in different directions, and
+      // framing them all dragged the fit back to district scale, which
+      // is exactly the far-out opening being fixed. Optional buses are
+      // still drawn on the map and still named in the earliest-bus
+      // card; they are simply not all in the opening frame.
+      const core=[];
+      if(yourLL) core.push(yourLL);
+      if(pos) core.push([pos.lat,pos.lon]);
+      // Campus anchors the frame only when no bus position exists to
+      // frame against — with a live bus in frame, Campus (kilometres
+      // behind the bus) would just drag the zoom back out.
+      if(!pos&&!others.length) core.push([CAMPUS.lat,CAMPUS.lon]);
+      const optional=[];
+      const nxtOther=others.filter(o=>!o.b.passed).sort((a,b)=>a.b.eta-b.b.eta)[0];
+      if(nxtOther) optional.push([nxtOther.p.lat,nxtOther.p.lon]);
+      if(icpt) optional.push([icpt.stop.lat,icpt.stop.lon]);
+      const distinct=core.filter((p,i)=>core.findIndex(q=>q[0]===p[0]&&q[1]===p[1])===i);
+      if(distinct.length>=2){
+        // Padding is sized to the markers themselves: the your-stop
+        // bubble is ~205px wide centred on its pin and the bus marker
+        // stack reaches ~88px above its anchor, so a framed point at
+        // the frame's edge still shows its whole marker on a phone.
+        const fb=L.latLngBounds(distinct);
+        optional.forEach(p=>{
+          const test=L.latLngBounds(fb.getSouthWest(),fb.getNorthEast()).extend(p);
+          // NB: getBoundsZoom's padding is the TOTAL inset, so it is
+          // given the fit's paddingTopLeft + paddingBottomRight sum.
+          if(S.map.getBoundsZoom(test,false,L.point(148,140))>=12) fb.extend(p);
+        });
+        S.map.fitBounds(fb,{paddingTopLeft:[92,84],paddingBottomRight:[56,56],maxZoom:15,animate:false});
+      } else {
+        S.map.fitBounds(L.latLngBounds(linePts),{padding:[24,24],maxZoom:15,animate:false});
+      }
+    }
   }
 }
 
@@ -2330,8 +2479,20 @@ function drawDriverMap(route,nextName){
   const fKey=route.id+"|"+state.trip;
   if(D.fitKey!==fKey){
     D.fitKey=fKey;
-    D.map.fitBounds(L.latLngBounds(linePts),{padding:[26,26],maxZoom:16,animate:false});
-    const zl=$("drvZoomLbl"); if(zl) zl.textContent="Full route view";
+    // Narrow screens: frame the bus, its next stop and Campus at street
+    // level instead of the whole route extent (same rule as the student
+    // map). Wide screens keep the full-route view. Ticks never re-fit,
+    // so the driver's own pan/zoom is left alone.
+    let framed=false;
+    if(cw<=900&&pos){
+      const focus=[[pos.lat,pos.lon],[CAMPUS.lat,CAMPUS.lon]];
+      const nx=stops.find(s=>nextName&&canon(s.n)===canon(nextName));
+      if(nx&&nx.lat!==null&&nx.lon!==null) focus.push([nx.lat,nx.lon]);
+      const distinct=focus.filter((p,i)=>focus.findIndex(q=>q[0]===p[0]&&q[1]===p[1])===i);
+      if(distinct.length>=2){ D.map.fitBounds(L.latLngBounds(distinct),{paddingTopLeft:[34,56],paddingBottomRight:[34,34],maxZoom:15,animate:false}); framed=true; }
+    }
+    if(!framed) D.map.fitBounds(L.latLngBounds(linePts),{padding:[26,26],maxZoom:16,animate:false});
+    const zl=$("drvZoomLbl"); if(zl) zl.textContent=framed?"Framed on your bus":"Full route view";
   }
 }
 function zoomDriver(dir){
@@ -2440,11 +2601,13 @@ function drawAdminMap(){
   });
   Object.keys(A.markers).forEach(k=>{ if(!seen[k]){ A.map.removeLayer(A.markers[k].m); delete A.markers[k]; } });
   const note=$("admMapNote");
-  if(note) note.textContent=DATA.routes.length+" buses on the map • "+live+" on the road • "+TRIPS[state.trip]+" trip • positions update with the simulated clock ("+fmt(simMin())+").";
+  if(note) note.textContent=DATA.routes.length+" buses on the map • "+live+" on the road • "+TRIPS[state.trip]+" trip • positions as of "+fmt(simMin())+".";
   const fKey=String(state.trip);
   if(A.fitKey!==fKey&&pts.length>1){
     A.fitKey=fKey;
-    A.map.fitBounds(L.latLngBounds(pts),{padding:[28,28],maxZoom:15,animate:false});
+    // Tightest useful fleet extent (Campus + every live bus position);
+    // slightly tighter padding on phone widths. Never re-fitted on ticks.
+    A.map.fitBounds(L.latLngBounds(pts),{padding:cw<=640?[18,18]:[28,28],maxZoom:15,animate:false});
   }
 }
 function renderAdmin(){
@@ -2625,7 +2788,7 @@ function setStopsDrawer(open){
 }
 $("stopsBtn").addEventListener("click",()=>setStopsDrawer(!uiState.stops));
 $("stopsClose").addEventListener("click",()=>setStopsDrawer(false));
-function tick(){ $("clock").textContent=fmt(simMin())+" (simulated)"; }
+function tick(){ $("clock").textContent=fmt(simMin()); }
 $("mapStops").addEventListener("click",e=>{
   const row=e.target&&e.target.closest?e.target.closest("[data-pin]"):null;
   if(!row||!S.map) return;
@@ -2711,10 +2874,27 @@ function enhanceSelect(sel){
     syncLabel();
     if(!open) buildList(); // while open, leave the rows/scroll/search alone; rebuilt on next open
   }
+  // Keep the open panel fully inside the viewport on any screen width:
+  // cap its width to the viewport minus margins, then shift it sideways
+  // (relative to its .csel wrapper) until both edges are on screen. The
+  // panel is absolutely positioned, so without this an anchored panel can
+  // start off-screen or spill past the far edge and clip its row text —
+  // and create horizontal page overflow while open.
+  function clampPop(){
+    pop.style.left=""; pop.style.width="";
+    var vw=document.documentElement.clientWidth||window.innerWidth, m=8;
+    var r=pop.getBoundingClientRect();
+    if(r.width>vw-2*m){ pop.style.width=(vw-2*m)+"px"; r=pop.getBoundingClientRect(); }
+    var shift=0;
+    if(r.left<m) shift=m-r.left;
+    else if(r.right>vw-m) shift=(vw-m)-r.right;
+    if(shift) pop.style.left=shift+"px";
+  }
   function openPop(){
     if(cselOpenInst&&cselOpenInst!==inst) cselOpenInst.close();
     search.value=""; buildList();
     pop.hidden=false; open=true; cselOpenInst=inst;
+    clampPop();
     btn.setAttribute("aria-expanded","true");
     const selRow=list.querySelector(".csel-opt.sel");
     if(selRow) selRow.scrollIntoView({block:"nearest"});
@@ -2735,6 +2915,7 @@ function enhanceSelect(sel){
     syncLabel(); btn.focus();
   }
   btn.addEventListener("click",function(){ open?closePop():openPop(); });
+  window.addEventListener("resize",function(){ if(open) clampPop(); });
   search.addEventListener("input",function(){ buildList(); });
   document.addEventListener("pointerdown",function(e){ if(open&&!wrap.contains(e.target)) closePop(); });
   wrap.addEventListener("keydown",function(e){
@@ -2824,11 +3005,13 @@ function enhanceSelect(sel){
   }
   function showGate(){
     authView.hidden=false; document.body.classList.add("auth-open");
+    document.documentElement.classList.add("pre-gate"); document.documentElement.classList.remove("pre-app");
     gateMain.hidden=false; gateAdmin.hidden=true;
     window.scrollTo(0,0);
   }
   function hideGate(){
     authView.hidden=true; document.body.classList.remove("auth-open");
+    document.documentElement.classList.add("pre-app"); document.documentElement.classList.remove("pre-gate");
   }
 
   // ---- Post-login welcome splash -------------------------------------
@@ -2986,6 +3169,24 @@ function enhanceSelect(sel){
     var open=userMenu.hidden;
     userMenu.hidden=!open;
     $("userChip").setAttribute("aria-expanded",open?"true":"false");
+    if(open){
+      // The menu is right-anchored to the chip (min-width 210px). On phone
+      // widths the header wraps and the chip lands at the LEFT edge, so a
+      // right-anchored 210px menu opened from a ~100px chip started
+      // off-screen (measured left:-108px at 390px) and its "Home stop: …"
+      // line was clipped. Clamp it into the viewport, same as the custom
+      // dropdown panels: shift it relative to its positioned ancestor
+      // (.auth-area) until both edges are on screen.
+      userMenu.style.left=""; userMenu.style.right=""; userMenu.style.width="";
+      var vw=document.documentElement.clientWidth||window.innerWidth, m=8;
+      var r=userMenu.getBoundingClientRect();
+      if(r.width>vw-2*m){ userMenu.style.width=(vw-2*m)+"px"; r=userMenu.getBoundingClientRect(); }
+      if(r.left<m||r.right>vw-m){
+        var host=userMenu.offsetParent?userMenu.offsetParent.getBoundingClientRect():{left:0,right:vw};
+        if(r.left<m){ userMenu.style.right="auto"; userMenu.style.left=(m-host.left)+"px"; }
+        else { userMenu.style.left="auto"; userMenu.style.right=(host.right-(vw-m))+"px"; }
+      }
+    }
   });
   document.addEventListener("pointerdown",function(e){
     if(!userMenu.hidden && !$("authUser").contains(e.target)){ userMenu.hidden=true; $("userChip").setAttribute("aria-expanded","false"); }
