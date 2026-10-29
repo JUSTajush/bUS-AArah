@@ -772,6 +772,17 @@ body.auth-open .topbar,body.auth-open .wrap{display:none}
 .admin-submit:hover{background:#232326}
 .admin-submit:active{transform:scale(.985)}
 .admin-submit:focus-visible{outline:3px solid rgba(11,11,12,.4);outline-offset:2px}
+/* ---------- post-login welcome splash (sign-in / sign-up only) ---------- */
+#welcomeSplash{position:fixed;inset:0;z-index:3000;background:#ffffff;color:#0b0b0c;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;cursor:pointer;transition:opacity .4s ease}
+#welcomeSplash[hidden]{display:none}
+#welcomeSplash.ws-out{opacity:0;pointer-events:none}
+.ws-inner{animation:ws-in .4s ease-out both;max-width:340px}
+@keyframes ws-in{from{opacity:0;transform:translateY(12px) scale(.96)}to{opacity:1;transform:translateY(0) scale(1)}}
+.ws-logo{line-height:0;display:flex;justify-content:center}
+.ws-word{font-family:"Baloo 2","Archivo",sans-serif;font-weight:800;font-size:36px;line-height:1.1;margin-top:10px;letter-spacing:.2px}
+.ws-hi{font-family:"Baloo 2","Archivo",sans-serif;font-weight:700;font-size:25px;line-height:1.2;margin-top:18px}
+.ws-sub{font-size:14.5px;font-weight:500;color:#717176;margin-top:5px}
+@media(prefers-reduced-motion:reduce){.ws-inner{animation:none}#welcomeSplash{transition:none}}
 
 h1.title{font-size:clamp(28px,4.6vw,46px);font-weight:900;line-height:1.04;letter-spacing:-.025em;margin:8px 0 0;max-width:780px}
 h1.title em{font-style:normal;background:#000;color:#fff;padding:0 10px;border-radius:8px}
@@ -780,6 +791,12 @@ h1.title em{font-style:normal;background:#000;color:#fff;padding:0 10px;border-r
 /* ---------- shared stop / route / trip control bar ---------- */
 #controlsHome{margin-top:18px}
 #controlsHome:empty{display:none}
+/* Admin oversees the whole fleet and has no personal stop: the shared
+   stop / route / location bar and the student headline above it are
+   hidden for the admin role only (placeControls toggles .is-admin).
+   Student and Driver keep them exactly as they are. */
+body.is-admin .title,body.is-admin .lede,body.is-admin #controlsHome{display:none}
+body.is-admin #view-admin{margin-top:2px}
 #controlsBar{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:flex-end;background:var(--surface);border:1px solid var(--line);border-radius:24px;padding:10px 14px}
 #stageControls #controlsBar{border:0;box-shadow:0 10px 30px rgba(0,0,0,.24)}
 .cb-group{display:flex;flex-direction:column;gap:5px;min-width:0}
@@ -830,6 +847,12 @@ h1.title em{font-style:normal;background:#000;color:#fff;padding:0 10px;border-r
 .trip{border:0;padding:8px 13px;border-radius:999px;background:transparent;color:var(--muted);font-weight:700;cursor:pointer;white-space:nowrap}
 .trip.active{background:#000;color:#fff}
 @media(prefers-color-scheme:dark){.trip.active{background:#f4f4f2;color:#000}}
+/* Admin's own trip switch, inside the Live fleet map card (the shared
+   bar with the stop picker is hidden for admin). Same pill language as
+   .trip but a separate class so the shared bar's handlers never see it. */
+.atrip{border:0;padding:8px 13px;border-radius:999px;background:transparent;color:var(--muted);font-weight:700;cursor:pointer;white-space:nowrap}
+.atrip.active{background:#000;color:#fff}
+@media(prefers-color-scheme:dark){.atrip.active{background:#f4f4f2;color:#000}}
 /* ---------- student map stage ---------- */
 .stagewrap{position:relative;height:700px;margin-top:18px}
 #map{position:absolute;inset:0;border-radius:26px;overflow:hidden;background:#e9e7df;box-shadow:0 18px 44px rgba(0,0,0,.16)}
@@ -1006,6 +1029,8 @@ select.admsel{padding:10px 14px;border-radius:999px;border:1px solid var(--line)
 .belowgrid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}
 /* ---------- driver ---------- */
 #drvMap{width:100%;height:440px;display:block;border-radius:14px;border:1px solid var(--line);background:#e9e7df;z-index:0}
+#admMap{width:100%;height:460px;display:block;border-radius:14px;border:1px solid var(--line);background:#e9e7df;z-index:0}
+@media(max-width:900px){#admMap{height:360px}}
 .drvnext{background:#000;color:#fff;border-radius:20px;padding:22px;margin-top:14px}
 .drvnext .nxlabel{font-size:12px;letter-spacing:.08em;text-transform:uppercase;font-weight:800;opacity:.75}
 .drvnext .nxname{font-size:clamp(30px,6vw,46px);font-weight:900;line-height:1.08;margin-top:2px;letter-spacing:-.02em}
@@ -1177,6 +1202,17 @@ select.admsel{padding:10px 14px;border-radius:999px;border:1px solid var(--line)
     </div>
   </div>
 </div>
+
+<!-- POST-LOGIN WELCOME SPLASH: shown only immediately after a successful
+     sign-up / log-in (never on session restore or logout); tap to skip. -->
+<div id="welcomeSplash" hidden role="status">
+  <div class="ws-inner">
+    <div class="ws-logo" aria-hidden="true"><svg width="96" height="55" viewBox="0 0 56 32"><path d="M10 4h32c4.2 0 7.9 2.6 9.4 6.4l1.3 3.4c.4 1 .6 2.1.6 3.2v4.5c0 1.4-1.1 2.5-2.5 2.5H5.5C4.1 24 3 22.9 3 21.5V9C3 6.2 5.2 4 10 4Z" fill="#f5a623"/><rect x="7" y="7.5" width="8" height="7" rx="1.8" fill="#161617"/><rect x="17" y="7.5" width="8" height="7" rx="1.8" fill="#161617"/><rect x="27" y="7.5" width="8" height="7" rx="1.8" fill="#161617"/><path d="M38 7.5h3c2 0 3.9 1.2 4.7 3.1l1.2 3.9H38Z" fill="#161617"/><circle cx="50.6" cy="19.8" r="1.6" fill="#161617"/><circle cx="14" cy="24" r="5" fill="#ffffff"/><circle cx="42" cy="24" r="5" fill="#ffffff"/><circle cx="14" cy="24" r="3.5" fill="#141414"/><circle cx="42" cy="24" r="3.5" fill="#141414"/><circle cx="14" cy="24" r="1.3" fill="#f5a623"/><circle cx="42" cy="24" r="1.3" fill="#f5a623"/></svg></div>
+    <div class="ws-word">बसaarah</div>
+    <div class="ws-hi" id="wsHi">Welcome</div>
+    <div class="ws-sub" id="wsSub" hidden></div>
+  </div>
+</div>
 <div class="wrap">
   <h1 class="title">Your bus, live — <em>no more guessing</em> at the stop</h1>
   <p class="lede">Watch your bus moving on the map towards your stop — like tracking a cab. See how many buses have already passed your stop, how many are still coming, and when the next one reaches you. Any bus that comes, you can board: no bus number is assigned to any student.</p>
@@ -1314,6 +1350,17 @@ select.admsel{padding:10px 14px;border-radius:999px;border:1px solid var(--line)
   <section class="view" id="view-admin">
     <div style="display:grid;gap:16px">
       <div class="card">
+        <h2>Live fleet map — <span id="admMapTrip"></span></h2>
+        <p class="sub">Every bus on every route, at its live position. Tap a bus to see which bus and route it is.</p>
+        <div class="trips" id="admTripBtns" role="group" aria-label="Trip shown on the fleet map, in the fleet list and for the delay override" style="margin-top:12px">
+          <button class="atrip active" data-atrip="0" type="button">Morning</button>
+          <button class="atrip" data-atrip="1" type="button">Morning 2nd Trip</button>
+          <button class="atrip" data-atrip="2" type="button">Afternoon</button>
+        </div>
+        <div id="admMap" style="margin-top:12px" role="application" aria-label="Live fleet map for the admin — every bus on every route, interactive Leaflet map"></div>
+        <p class="sub" id="admMapNote" style="margin-top:10px"></p>
+      </div>
+      <div class="card">
         <h2>Fleet overview — <span id="admTripName"></span></h2>
         <div style="display:grid;gap:8px;margin-top:12px" id="admFleet"></div>
       </div>
@@ -1324,7 +1371,7 @@ select.admsel{padding:10px 14px;border-radius:999px;border:1px solid var(--line)
       </div>
       <div class="card">
         <h2>Delay override — admin only</h2>
-        <p class="sub">Applies to the trip selected at the top (<b id="admDelayTrip"></b>). Student ETAs shift everywhere at once.</p>
+        <p class="sub">Applies to the trip selected on the fleet map above (<b id="admDelayTrip"></b>). Student ETAs shift everywhere at once.</p>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px">
           <select class="admsel" id="admDelayRoute" aria-label="Route for delay override"></select>
           <div style="display:flex;gap:8px;flex-wrap:wrap" id="admDelayBtns">
@@ -1335,10 +1382,6 @@ select.admsel{padding:10px 14px;border-radius:999px;border:1px solid var(--line)
           </div>
         </div>
         <p class="sub" id="admDelayNote" style="margin-top:10px"></p>
-      </div>
-      <div class="card">
-        <h2>Data quality — location not confirmed (8 stops)</h2>
-        <p class="sub">In the chart with times, but no map pin: Bajrangbali Mandir (Baridih) • Kulgora • Plaza • Akashwani Chowk • Narwapahar • R.D Tata Square • Rajasthan Dharamshala • Road No. 17.</p>
       </div>
     </div>
   </section>
@@ -2190,7 +2233,7 @@ function renderStudent(){
   stops.forEach((s,i)=>{
     const lt=liveTime(route,s);
     const st=lt===null?'<span class="badge b-grey">—</span>':lt<now?'<span class="badge b-grey">Passed '+fmt(lt)+'</span>':'<span class="badge b-green">Coming • ETA '+Math.round(lt-now)+' min</span>';
-    rows.push(`<div class="ttrow"><span><b>${s.n}</b> ${i===0?'<span class="badge b-teal">1st stop</span>':""} ${canon(s.n)===canon(state.stopName)?'<span class="badge b-amber">Your stop</span>':""} ${s.request?'<span class="badge b-amber">Request stop</span>':""} ${s.lat===null?'<span class="badge b-grey">Location not confirmed</span>':""}</span><span class="sub">Chart ${s.request?"— (no printed time)":(s.t[state.trip]||"—")} • Live ${lt===null?"—":fmt(lt)}</span>${st}</div>`);
+    rows.push(`<div class="ttrow"><span><b>${s.n}</b> ${i===0?'<span class="badge b-teal">1st stop</span>':""} ${canon(s.n)===canon(state.stopName)?'<span class="badge b-amber">Your stop</span>':""} ${s.request?'<span class="badge b-amber">Request stop</span>':""}</span><span class="sub">Chart ${s.request?"— (no printed time)":(s.t[state.trip]||"—")} • Live ${lt===null?"—":fmt(lt)}</span>${st}</div>`);
   });
   $("ttList").innerHTML=rows.join("");
 }
@@ -2334,8 +2377,81 @@ function renderDriver(){
   }).join("");
   drawDriverMap(route,nextX?nextX.s.n:null);
 }
+// Admin's live fleet map: the same Leaflet treatment as the student and
+// driver maps (makeBase — same basemap, mirror/offline failover, layers
+// control), but showing the WHOLE fleet: every route's bus at its live
+// busPosition() on the shared simulated clock, in the same marker family
+// as the student map's other buses (otherBusIcon — black bus-number/route
+// chip, white bus icon, round 7x7 anchor dot). Faint route lines give the
+// fleet context. Ticks only move markers; the view is fitted to the whole
+// fleet on first show and when the trip changes, never on a refresh tick,
+// so an admin's pan/zoom persists like the other views'.
+const A={map:null,holder:{map:null},base:null,lineLayer:null,linesKey:"",campus:null,markers:{},fitKey:"",sizeW:0,sizeH:0,wasHidden:true};
+function initAdminMap(){
+  const el=$("admMap"); if(!el||typeof L==="undefined"||A.map) return;
+  A.map=L.map("admMap",{zoomControl:false});
+  A.holder.map=A.map;
+  A.base=makeBase(A.holder,null);
+  A.map.addLayer(A.base.live);
+  L.control.zoom({position:"bottomright"}).addTo(A.map);
+  L.control.layers(A.base.bases,null,{position:"topright"}).addTo(A.map);
+  A.lineLayer=L.layerGroup().addTo(A.map);
+}
+function admBusPopup(r,pos){
+  return "<b>"+esc(state.allot[r.id])+" — "+esc(r.id)+"</b><br>"+esc(pos.status)+"<br>1st stop: "+esc(r.stops[0].n)+(delayOf(r.id)?"<br>Delayed +"+delayOf(r.id)+" min (admin override)":"");
+}
+function drawAdminMap(){
+  const el=$("admMap"); if(!el) return;
+  initAdminMap(); if(!A.map) return;
+  const cw=el.clientWidth, ch=el.clientHeight;
+  if(!cw||!ch){ A.wasHidden=true; return; }
+  if(A.wasHidden||cw!==A.sizeW||ch!==A.sizeH){ A.sizeW=cw; A.sizeH=ch; A.wasHidden=false; A.map.invalidateSize(); }
+  // Faint route lines for every route — rebuilt only when the trip changes.
+  if(A.linesKey!==String(state.trip)){
+    A.linesKey=String(state.trip); A.lineLayer.clearLayers();
+    DATA.routes.forEach(r=>{
+      L.polyline(routeLine(r),{color:"#0b0b0c",weight:2.5,opacity:.18}).addTo(A.lineLayer);
+    });
+    if(!A.campus){
+      A.campus=L.marker([CAMPUS.lat,CAMPUS.lon],{icon:L.divIcon({className:"lf-div",html:'<div class="campus-ic"></div>',iconSize:[15,15],iconAnchor:[8,8]})});
+      A.campus.bindPopup(pinHTML("campus"));
+      A.campus.bindTooltip("Gamaharia Campus",{permanent:true,direction:"right",offset:[10,0],className:"stoplabel"});
+      A.campus.addTo(A.map);
+    }
+  }
+  // One marker per route = the whole fleet, at exact live positions.
+  const seen={}, pts=[[CAMPUS.lat,CAMPUS.lon]]; let live=0;
+  DATA.routes.forEach(r=>{
+    const pos=busPosition(r); if(!pos) return;
+    seen[r.id]=true; pts.push([pos.lat,pos.lon]);
+    const done=/^Completed/.test(pos.status||""); if(!done) live++;
+    const ic=otherBusIcon({busNo:state.allot[r.id],route:r,passed:done});
+    const ex=A.markers[r.id];
+    if(!ex){
+      const m=L.marker([pos.lat,pos.lon],{icon:ic.icon}).addTo(A.map);
+      m.bindPopup(admBusPopup(r,pos));
+      A.markers[r.id]={m:m,html:ic.html};
+    } else {
+      ex.m.setLatLng([pos.lat,pos.lon]);
+      if(ex.html!==ic.html){ ex.m.setIcon(ic.icon); ex.html=ic.html; }
+      if(ex.m.setPopupContent) ex.m.setPopupContent(admBusPopup(r,pos));
+    }
+    const elm=A.markers[r.id].m.getElement(); if(elm) elm.title=state.allot[r.id]+" • "+r.id+" — "+pos.status;
+  });
+  Object.keys(A.markers).forEach(k=>{ if(!seen[k]){ A.map.removeLayer(A.markers[k].m); delete A.markers[k]; } });
+  const note=$("admMapNote");
+  if(note) note.textContent=DATA.routes.length+" buses on the map • "+live+" on the road • "+TRIPS[state.trip]+" trip • positions update with the simulated clock ("+fmt(simMin())+").";
+  const fKey=String(state.trip);
+  if(A.fitKey!==fKey&&pts.length>1){
+    A.fitKey=fKey;
+    A.map.fitBounds(L.latLngBounds(pts),{padding:[28,28],maxZoom:15,animate:false});
+  }
+}
 function renderAdmin(){
   $("admTripName").textContent=TRIPS[state.trip]+" trip";
+  const mt=$("admMapTrip"); if(mt) mt.textContent=TRIPS[state.trip]+" trip";
+  document.querySelectorAll("#admTripBtns .atrip").forEach(b=>b.classList.toggle("active",+b.dataset.atrip===state.trip));
+  drawAdminMap();
   $("admFleet").innerHTML=DATA.routes.map(r=>{
     const[label,cls,p,c]=routeStatus(r);
     return `<div class="rowitem"><span><b>${r.id}</b> <span class="sub">• ${state.allot[r.id]} today • 1st stop ${r.stops[0].n}</span></span><span style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end"><span class="badge b-grey">${p} stops passed</span><span class="badge b-grey">${c} to go</span><span class="badge ${cls}">${label}</span>${delayOf(r.id)?'<span class="badge b-red">+'+delayOf(r.id)+' min</span>':""}</span></div>`;
@@ -2350,10 +2466,19 @@ function renderAdmin(){
   $("admDelayNote").textContent=delayOf(dr)?("A +"+delayOf(dr)+" min delay is set for "+dr+" ("+TRIPS[state.trip]+") — student ETAs include it, and the driver's automatic status reflects it."):"No delay set for "+dr+" in the "+TRIPS[state.trip]+" trip.";
 }
 // The stop/route/trip selectors are one shared control bar: it floats over
-// the map in the Student view and sits above the views for Driver/Admin.
+// the map in the Student view and sits above the view for the Driver.
 // Moving the single element keeps one set of IDs and listeners.
+// The Admin has no personal stop or location — the bar (and the student
+// headline above it) is hidden for that role via body.is-admin, and the
+// admin picks the trip from the switch inside the fleet map card instead.
 function placeControls(){
   const bar=$("controlsBar"); if(!bar) return;
+  document.body.classList.toggle("is-admin",state.role==="admin");
+  if(state.role==="admin"){
+    const home=$("controlsHome");
+    if(home&&bar.parentElement!==home) home.appendChild(bar);
+    return;
+  }
   const target=state.role==="student"?$("stageControls"):$("controlsHome");
   if(target&&bar.parentElement!==target) target.appendChild(bar);
 }
@@ -2362,6 +2487,10 @@ function renderAll(draw=true){ placeControls(); renderSelectors(); if(state.role
   if(state.role!=="student"){ const keep=state.role; }
 }
 document.querySelectorAll(".trip").forEach(b=>b.addEventListener("click",()=>{document.querySelectorAll(".trip").forEach(x=>x.classList.remove("active"));b.classList.add("active");state.trip=+b.dataset.trip;renderAll();}));
+// Admin's own trip switch (in the fleet map card): drives the same
+// state.trip the fleet map, fleet list and delay override read, and
+// keeps the shared bar's trip buttons in sync for the other views.
+document.querySelectorAll("#admTripBtns .atrip").forEach(b=>b.addEventListener("click",()=>{state.trip=+b.dataset.atrip;document.querySelectorAll("#tripBtns .trip").forEach(x=>x.classList.toggle("active",+x.dataset.trip===state.trip));renderAll();}));
 $("routeSel").addEventListener("change",e=>{state.routeId=e.target.value;
   // Reverse flow: never leave a stop selected that this route doesn't serve —
   // move to the route's 1st stop (the route list is already filtered to routes
@@ -2504,9 +2633,9 @@ $("mapStops").addEventListener("click",e=>{
   setStopsDrawer(false);
   m.openPopup();
 });
-window.addEventListener("resize",()=>{ S.sizeW=0; D.sizeW=0; if(state.role==="student"&&curDrawn) drawMap(curDrawn.route); if(state.role==="driver"&&drvLast) drawDriverMap(drvLast.route,drvLast.nextName); });
+window.addEventListener("resize",()=>{ S.sizeW=0; D.sizeW=0; A.sizeW=0; if(state.role==="student"&&curDrawn) drawMap(curDrawn.route); if(state.role==="driver"&&drvLast) drawDriverMap(drvLast.route,drvLast.nextName); if(state.role==="admin") drawAdminMap(); });
 // Small read handle for automated checks of the live map state.
-window.__aju={studentMap:()=>S.map,driverMap:()=>D.map,selBusMarker:()=>S.selBus,otherBusMarkers:()=>S.others,pinMarkers:()=>S.pinMarkers,base:()=>S.base,busPosition:busPosition,simMin:simMin,state:state,DATA:DATA,refresh:()=>{ if(curDrawn) drawMap(curDrawn.route); }};
+window.__aju={studentMap:()=>S.map,driverMap:()=>D.map,adminMap:()=>A.map,adminBusMarkers:()=>A.markers,selBusMarker:()=>S.selBus,otherBusMarkers:()=>S.others,pinMarkers:()=>S.pinMarkers,base:()=>S.base,adminBase:()=>A.base,busPosition:busPosition,simMin:simMin,state:state,DATA:DATA,refresh:()=>{ if(curDrawn) drawMap(curDrawn.route); }};
 // ---- Site-styled dropdowns ---------------------------------------------
 // The popup list of a native <select> is drawn by the OS — black list,
 // blue highlight, grey scrollbar — and no CSS can theme it. So each
@@ -2701,12 +2830,71 @@ function enhanceSelect(sel){
   function hideGate(){
     authView.hidden=true; document.body.classList.remove("auth-open");
   }
+
+  // ---- Post-login welcome splash -------------------------------------
+  // Called ONLY from signIn() below, i.e. right after a successful
+  // sign-up / log-in (student, driver or admin). The session-restore
+  // path at the bottom of this block never calls it, so reopening or
+  // reloading the page with a saved session goes straight into the app.
+  // Timing: ~0.4s fade-in, ~0.8s hold, ~0.4s fade-out (~1.6s total);
+  // a tap/click skips it; reduced-motion shows it briefly with no
+  // animation. All timers are cleared on dismiss so it can never
+  // linger, repeat, or block the app.
+  var wsEl=$("welcomeSplash"), wsHoldTimer=null, wsHideTimer=null;
+  function wsClearTimers(){
+    if(wsHoldTimer){ clearTimeout(wsHoldTimer); wsHoldTimer=null; }
+    if(wsHideTimer){ clearTimeout(wsHideTimer); wsHideTimer=null; }
+  }
+  function dismissWelcome(hideDelay){
+    if(!wsEl) return;
+    wsClearTimers();
+    if(wsEl.hidden) return;
+    if(!hideDelay){ wsEl.hidden=true; wsEl.classList.remove("ws-out"); return; }
+    wsEl.classList.add("ws-out");
+    wsHideTimer=setTimeout(function(){
+      wsHideTimer=null; wsEl.hidden=true; wsEl.classList.remove("ws-out");
+    }, hideDelay);
+  }
+  function showWelcome(user){
+    if(!wsEl||!user) return;
+    var r=userRole(user);
+    var first = r==="admin" ? "Admin" : (user.name||"").trim().split(/\s+/)[0];
+    $("wsHi").textContent = first ? ("Welcome, " + first) : "Welcome";
+    var sub=$("wsSub");
+    if(r==="student" && user.stop){ sub.textContent=user.stop; sub.hidden=false; }
+    else { sub.textContent=""; sub.hidden=true; }
+    wsClearTimers();
+    wsEl.style.transitionDuration="";
+    wsEl.classList.remove("ws-out");
+    wsEl.hidden=false;
+    // Restart the entrance animation even if the splash ran before.
+    var inner=wsEl.querySelector(".ws-inner");
+    if(inner){ inner.style.animation="none"; void inner.offsetWidth; inner.style.animation=""; }
+    var reduced=false;
+    try{ reduced=window.matchMedia("(prefers-reduced-motion: reduce)").matches; }catch(e){}
+    if(reduced){
+      wsHoldTimer=setTimeout(function(){ dismissWelcome(0); }, 600);
+    }else{
+      wsHoldTimer=setTimeout(function(){ dismissWelcome(420); }, 1180);
+    }
+  }
+  if(wsEl){
+    wsEl.addEventListener("click",function(){
+      if(wsEl.hidden) return;
+      var reduced=false;
+      try{ reduced=window.matchMedia("(prefers-reduced-motion: reduce)").matches; }catch(e){}
+      if(reduced){ dismissWelcome(0); return; }
+      wsEl.style.transitionDuration=".15s";
+      dismissWelcome(160);
+    });
+  }
   function signIn(user){
     currentUser=user; setSession(userRole(user)==="admin" ? ADMIN_SESSION : user.email);
     var r=userRole(user);
     if(r==="student") applyHomeStop(user);
     setRoleView(r);
     renderAuthHeader(); hideGate(); renderAll();
+    showWelcome(user);
     if(r==="student") setTimeout(function(){ if(curDrawn) drawMap(curDrawn.route); },60);
   }
   function signOut(){
