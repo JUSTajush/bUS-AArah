@@ -683,11 +683,96 @@ button,select,input{font:inherit}h1,h2,h3{font-family:"Archivo",sans-serif;lette
 .brand b{font-family:"Baloo 2","Archivo",sans-serif;font-size:19px;font-weight:800;display:block;line-height:1.15;letter-spacing:0}.brand span{font-size:12px;color:var(--muted);font-weight:500}
 .pill{display:inline-flex;align-items:center;gap:7px;background:var(--surface);border:1.5px solid var(--ink);color:var(--ink);padding:6px 12px;border-radius:999px;font-size:12.5px;font-weight:700}
 .dot{width:8px;height:8px;background:var(--accent);border-radius:50%;animation:pulse-dot 1.6s infinite}@keyframes pulse-dot{50%{opacity:.35}}
-.roles{display:flex;gap:4px;background:var(--surface2);border-radius:999px;padding:4px}
-.role{border:0;background:transparent;padding:8px 18px;border-radius:999px;font-weight:700;cursor:pointer;color:var(--muted)}
-.role.active{background:#000;color:#fff}
-@media(prefers-color-scheme:dark){.role.active{background:#f4f4f2;color:#000}}
 .wrap{max-width:1400px;margin:0 auto;padding:20px 18px 36px}
+/* ---------- auth gate (demo, client-side) ---------- */
+.auth-area{position:relative;flex:none}
+.user-chip{display:flex;align-items:center;gap:8px;background:var(--surface2);border:0;padding:5px 14px 5px 5px;border-radius:999px;font-weight:800;cursor:pointer;color:var(--ink);font-size:14px}
+.avatar{width:30px;height:30px;border-radius:50%;background:#f5a623;color:#161617;display:grid;place-items:center;font-weight:900;font-size:14px;flex:none}
+.user-menu{position:absolute;top:calc(100% + 8px);right:0;min-width:210px;background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:0 18px 44px rgba(0,0,0,.24);padding:8px;z-index:950}
+.user-menu-stop{font-size:12.5px;color:var(--muted);font-weight:600;padding:6px 10px 8px;border-bottom:1px solid var(--line);margin-bottom:6px}
+.user-menu-item{display:block;width:100%;text-align:left;background:transparent;border:0;padding:10px;border-radius:10px;font-weight:700;cursor:pointer;color:var(--ink)}
+.user-menu-item:hover{background:var(--surface2)}
+body.auth-open .topbar,body.auth-open .wrap{display:none}
+#authView{min-height:100dvh;background:#e7e7ea}
+#gateMain[hidden],#gateAdmin[hidden]{display:none!important}
+/* ---------- auth gate: app-style (bright white column on soft grey) ---------- */
+.gate{display:flex;justify-content:center;min-height:100dvh}
+.gate-col{width:100%;max-width:420px;background:#ffffff;color:#0b0b0c;padding:26px 24px 40px;min-height:100dvh}
+@media(min-width:480px){
+.gate{padding:22px 16px 28px}
+.gate-col{min-height:min(880px,calc(100dvh - 50px));border-radius:30px;box-shadow:0 24px 60px rgba(11,11,12,.18),0 4px 14px rgba(11,11,12,.08)}
+}
+.gate-brand{display:flex;align-items:center;gap:11px}
+.gate-badge{width:46px;height:46px;flex:none;background:#f5a623;border-radius:13px;display:grid;place-items:center}
+.gate-badge svg{width:32px;height:32px;display:block}
+.gate-wordmark{font-family:"Baloo 2","Archivo",sans-serif;font-weight:800;font-size:29px;line-height:1;letter-spacing:.2px;color:#0b0b0c}
+.gate-wordmark small{display:block;font-family:"Archivo",sans-serif;font-weight:600;font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;color:#717176;margin-top:4px}
+.auth-h{font-family:"Baloo 2","Archivo",sans-serif;font-weight:700;font-size:31px;line-height:1.15;margin:26px 0 6px;color:#0b0b0c}
+.auth-sub{margin:0;font-size:14.5px;line-height:1.5;color:#717176;font-weight:500}
+.gate-label{font-size:12px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:#717176;margin:24px 0 10px}
+.role-cards{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.role-card{position:relative;text-align:left;cursor:pointer;background:#fff;border:2px solid #e8e8eb;border-radius:18px;padding:15px 14px 13px;display:flex;flex-direction:column;gap:9px;color:#0b0b0c;width:100%;font:inherit}
+.role-card .rc-ic{width:40px;height:40px;border-radius:12px;background:#f3f3f5;display:grid;place-items:center}
+.role-card .rc-ic svg{display:block}
+.role-card .rc-title{font-family:"Baloo 2","Archivo",sans-serif;font-weight:700;font-size:18px;line-height:1;color:#0b0b0c}
+.role-card .rc-sub{font-size:12px;line-height:1.4;color:#717176;font-weight:500}
+.role-card .rc-tick{position:absolute;top:11px;right:11px;width:19px;height:19px;border-radius:50%;background:#f5a623;display:none;place-items:center}
+.role-card .rc-tick svg{width:11px;height:11px;display:block}
+.role-card.selected{border-color:#f5a623;background:#fff6e0}
+.role-card.selected .rc-ic{background:#ffe9b8}
+.role-card.selected .rc-tick{display:grid}
+.role-card:focus-visible{outline:3px solid rgba(245,166,35,.5);outline-offset:2px}
+.auth-tabs{margin-top:22px;background:#f3f3f5;border-radius:99px;padding:4px;display:grid;grid-template-columns:1fr 1fr;gap:4px}
+.auth-tab{border:0;background:transparent;cursor:pointer;font:inherit;font-size:14.5px;font-weight:600;color:#717176;padding:10px 0;border-radius:99px}
+.auth-tab.active{background:#fff;color:#0b0b0c;box-shadow:0 2px 8px rgba(11,11,12,.12)}
+.auth-tab:focus-visible{outline:3px solid rgba(245,166,35,.5);outline-offset:1px}
+#authView form{margin-top:20px}
+.field{margin-bottom:14px}
+.field label{display:block;font-size:12.5px;font-weight:600;color:#3d3d40;margin:0 0 6px 2px}
+.field input{width:100%;height:54px;font:inherit;font-size:15.5px;color:#0b0b0c;background:#f3f3f5;border:2px solid #ececef;border-radius:14px;padding:0 14px;font-weight:500}
+.field input::placeholder{color:#a6a6ab}
+.field input:focus{outline:none;background:#fff;border-color:#f5a623;box-shadow:0 0 0 4px rgba(245,166,35,.22)}
+.field input[aria-invalid="true"]{border-color:#b3261e}
+.pw-wrap{position:relative}
+.pw-wrap input{padding-right:50px}
+.pw-toggle{position:absolute;right:6px;top:50%;transform:translateY(-50%);width:40px;height:40px;border:0;background:transparent;cursor:pointer;display:grid;place-items:center;border-radius:10px;color:#8a8a90;padding:0}
+.pw-toggle svg{width:21px;height:21px;display:block}
+.pw-toggle:focus-visible{outline:2px solid #f5a623;outline-offset:-2px}
+.ferr{color:#b3261e;font-size:13px;font-weight:600;margin:6px 0 0}
+.auth-err{background:#fdecea;color:#8c1d18;border-radius:12px;padding:10px 13px;font-size:13.5px;font-weight:700;margin:0 0 14px}
+.auth-submit{width:100%;height:56px;margin-top:10px;border:0;border-radius:14px;cursor:pointer;background:#f5a623;color:#0b0b0c;font:inherit;font-size:16.5px;font-weight:800;letter-spacing:.01em;box-shadow:0 6px 16px rgba(245,166,35,.35)}
+.auth-submit:hover{background:#f7b13e}
+.auth-submit:active{transform:scale(.985)}
+.auth-submit:focus-visible{outline:3px solid rgba(245,166,35,.55);outline-offset:2px}
+.switch-hint{text-align:center;font-size:13.5px;color:#717176;margin:16px 0 0}
+.switch-hint button{appearance:none;border:0;background:none;cursor:pointer;font:inherit;font-weight:700;color:#0b0b0c;padding:2px;text-decoration:underline;text-decoration-color:#f5a623;text-decoration-thickness:2px;text-underline-offset:4px}
+.gate-bottom{margin-top:26px;padding-top:18px;border-top:1px solid #e8e8eb;text-align:center}
+.admin-link{appearance:none;border:0;background:none;cursor:pointer;font:inherit;font-size:13px;font-weight:600;color:#9a9aa0;padding:6px 10px}
+.admin-link:hover{color:#3d3d40}
+/* signup stop picker: keep the site's real custom dropdown, in gate colours */
+#authView .csel-btn{background-color:#f3f3f5;border:2px solid #ececef;border-radius:14px;height:54px;padding:0 40px 0 14px;font-size:15.5px;font-weight:500;color:#0b0b0c;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24'><path fill='%23717176' d='M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z'/></svg>")}
+#authView .csel-pop{background:#fff;border-color:#e8e8eb;color:#0b0b0c}
+#authView .csel-search{background:#f3f3f5;color:#0b0b0c}
+#authView .csel-opt{color:#0b0b0c}
+#authView .csel-opt:hover,#authView .csel-opt.active{background:#f3f3f5}
+#authView .csel-opt.sel{background:#0b0b0c;color:#fff}
+#authView .csel-opt.sel:hover,#authView .csel-opt.sel.active{background:#0b0b0c}
+/* ---------- admin screen: near-black, compact white card ---------- */
+.admin-gate{min-height:100dvh;background:#0b0b0c;display:flex;justify-content:center}
+.admin-col{width:100%;max-width:420px;padding:34px 24px 44px;display:flex;flex-direction:column;min-height:100dvh}
+@media(min-width:480px){.admin-col{min-height:min(880px,calc(100dvh - 50px))}}
+.admin-back{align-self:flex-start;appearance:none;border:0;background:none;cursor:pointer;font:inherit;color:#a1a1a8;font-size:13.5px;font-weight:600;padding:6px 0}
+.admin-back:hover{color:#fff}
+.admin-card{margin:auto 0;width:100%;background:#fff;color:#0b0b0c;border-radius:22px;padding:28px 22px 24px;box-shadow:0 20px 44px rgba(0,0,0,.45)}
+.admin-eyebrow{font-size:10.5px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:#717176}
+.admin-h{font-family:"Baloo 2","Archivo",sans-serif;font-weight:700;font-size:26px;margin:6px 0 4px;line-height:1.15;color:#0b0b0c}
+.admin-sub{margin:0 0 20px;font-size:13.5px;line-height:1.5;color:#717176;font-weight:500}
+.admin-card form{margin-top:0}
+.admin-submit{width:100%;height:54px;margin-top:8px;border:0;border-radius:14px;cursor:pointer;background:#0b0b0c;color:#fff;font:inherit;font-size:16px;font-weight:700}
+.admin-submit:hover{background:#232326}
+.admin-submit:active{transform:scale(.985)}
+.admin-submit:focus-visible{outline:3px solid rgba(11,11,12,.4);outline-offset:2px}
+
 h1.title{font-size:clamp(28px,4.6vw,46px);font-weight:900;line-height:1.04;letter-spacing:-.025em;margin:8px 0 0;max-width:780px}
 h1.title em{font-style:normal;background:#000;color:#fff;padding:0 10px;border-radius:8px}
 @media(prefers-color-scheme:dark){h1.title em{background:#f4f4f2;color:#000}}
@@ -962,14 +1047,136 @@ select.admsel{padding:10px 14px;border-radius:999px;border:1px solid var(--line)
   <div class="brand"><div class="logo" role="img" aria-label="बसaarah logo"><svg width="40" height="23" viewBox="0 0 56 32" aria-hidden="true"><path d="M10 4h32c4.2 0 7.9 2.6 9.4 6.4l1.3 3.4c.4 1 .6 2.1.6 3.2v4.5c0 1.4-1.1 2.5-2.5 2.5H5.5C4.1 24 3 22.9 3 21.5V9C3 6.2 5.2 4 10 4Z" fill="#f5a623"/><rect x="7" y="7.5" width="8" height="7" rx="1.8" fill="#161617"/><rect x="17" y="7.5" width="8" height="7" rx="1.8" fill="#161617"/><rect x="27" y="7.5" width="8" height="7" rx="1.8" fill="#161617"/><path d="M38 7.5h3c2 0 3.9 1.2 4.7 3.1l1.2 3.9H38Z" fill="#161617"/><circle cx="50.6" cy="19.8" r="1.6" fill="#161617"/><circle cx="14" cy="24" r="5" fill="var(--surface)"/><circle cx="42" cy="24" r="5" fill="var(--surface)"/><circle cx="14" cy="24" r="3.5" fill="#141414"/><circle cx="42" cy="24" r="3.5" fill="#141414"/><circle cx="14" cy="24" r="1.3" fill="#f5a623"/><circle cx="42" cy="24" r="1.3" fill="#f5a623"/></svg></div><div><b>बसaarah</b><span>ARKA JAIN University • Gamharia Campus</span></div></div>
   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
     <span class="pill"><span class="dot"></span> SIMULATED LIVE TRACKING • <span id="clock">--:--</span></span>
-    <div class="roles" role="tablist">
-      <button class="role active" data-role="student">Student</button>
-      <button class="role" data-role="driver">Driver</button>
-      <button class="role" data-role="admin">Admin</button>
+    <div class="auth-area">
+      <div class="auth-user" id="authUser" hidden>
+        <button id="userChip" type="button" class="user-chip" aria-haspopup="true" aria-expanded="false"><span class="avatar" id="userAvatar" aria-hidden="true">?</span><span id="userName"></span></button>
+        <div class="user-menu" id="userMenu" hidden>
+          <div class="user-menu-stop" id="userMenuStop"></div>
+          <button id="logoutBtn" type="button" class="user-menu-item">Log out</button>
+        </div>
+      </div>
     </div>
   </div>
 </header>
 
+<!-- AUTH GATE (full screen; app stays hidden until login / signup) -->
+<div id="authView" hidden>
+  <div id="gateMain" class="gate">
+    <div class="gate-col">
+      <div class="gate-brand">
+        <div class="gate-badge" aria-hidden="true"><svg viewBox="0 0 48 48" fill="none" aria-hidden="true"><rect x="5" y="10" width="38" height="22" rx="5" fill="#0b0b0c"/><rect x="9" y="14.5" width="7.5" height="8" rx="1.6" fill="#f5a623"/><rect x="18.5" y="14.5" width="7.5" height="8" rx="1.6" fill="#f5a623"/><rect x="28" y="14.5" width="7.5" height="8" rx="1.6" fill="#f5a623"/><rect x="37.5" y="14.5" width="3" height="8" rx="1.2" fill="#f5a623"/><circle cx="15" cy="35.5" r="4" fill="#0b0b0c"/><circle cx="15" cy="35.5" r="1.7" fill="#fff"/><circle cx="34" cy="35.5" r="4" fill="#0b0b0c"/><circle cx="34" cy="35.5" r="1.7" fill="#fff"/></svg></div>
+        <div class="gate-wordmark">बसaarah<small>AJU Bus Tracker</small></div>
+      </div>
+
+      <h1 class="auth-h" id="authHeading">Welcome to बसaarah</h1>
+      <p class="auth-sub" id="authSub">Your AJU bus, live — know it&rsquo;s coming, or know it&rsquo;s gone.</p>
+
+      <p class="gate-label" id="roleLabel">I am a</p>
+      <div class="role-cards" role="group" aria-labelledby="roleLabel">
+        <button type="button" class="role-card selected" id="roleCardStudent" aria-pressed="true"><span class="rc-tick" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 12.5 9.5 18 20 6.5" stroke="#0b0b0c" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="rc-ic"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#0b0b0c" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4.5a3 3 0 0 1 6 0"/><path d="M7.2 5.2C5.6 6.2 5 7.9 5 10v7a3 3 0 0 0 3 3h8a3 3 0 0 0 3-3v-7c0-2.1-.6-3.8-2.2-4.8"/><path d="M9 13.5h6V18a1.5 1.5 0 0 1-1.5 1.5h-3A1.5 1.5 0 0 1 9 18v-4.5Z"/><path d="M9 10h6" stroke="#f5a623" stroke-width="2.4"/></svg></span><span class="rc-title">Student</span><span class="rc-sub">Track my bus to campus</span></button>
+        <button type="button" class="role-card" id="roleCardDriver" aria-pressed="false"><span class="rc-tick" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M4 12.5 9.5 18 20 6.5" stroke="#0b0b0c" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span class="rc-ic"><svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#0b0b0c" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="8.6"/><circle cx="12" cy="12" r="2.2" fill="#f5a623" stroke="none"/><path d="M3.6 11.2h6M14.4 11.2h6M12 14.2v5.2"/></svg></span><span class="rc-title">Driver</span><span class="rc-sub">Run today&rsquo;s trip</span></button>
+      </div>
+
+      <div class="auth-tabs" role="tablist" aria-label="Log in or sign up">
+        <button id="tabLogin" type="button" class="auth-tab active" role="tab" aria-selected="true">Log in</button>
+        <button id="tabSignup" type="button" class="auth-tab" role="tab" aria-selected="false">Sign up</button>
+      </div>
+
+      <form id="loginForm" novalidate>
+        <div class="field">
+          <label for="liEmail">Email</label>
+          <input id="liEmail" type="email" autocomplete="email" placeholder="you@example.com">
+          <p class="ferr" id="err-liEmail" hidden></p>
+        </div>
+        <div class="field">
+          <label for="liPw">Password</label>
+          <div class="pw-wrap">
+            <input id="liPw" type="password" autocomplete="current-password" placeholder="Your password">
+            <button type="button" class="pw-toggle" data-target="liPw" aria-label="Show password"></button>
+          </div>
+          <p class="ferr" id="err-liPw" hidden></p>
+        </div>
+        <p class="auth-err" id="loginErr" role="alert" hidden></p>
+        <button type="submit" class="auth-submit" id="loginSubmit">Log in</button>
+        <p class="switch-hint">New to बसaarah? <button type="button" id="goSignupLink">Create an account</button></p>
+      </form>
+
+      <form id="signupForm" novalidate hidden>
+        <div class="field">
+          <label for="suName">Full name</label>
+          <input id="suName" type="text" autocomplete="name" placeholder="Your full name">
+          <p class="ferr" id="err-suName" hidden></p>
+        </div>
+        <div class="field">
+          <label for="suEmail">Email</label>
+          <input id="suEmail" type="email" autocomplete="email" placeholder="you@example.com">
+          <p class="ferr" id="err-suEmail" hidden></p>
+        </div>
+        <div class="field" id="suPhoneField" hidden>
+          <label for="suPhone">Phone number</label>
+          <input id="suPhone" type="tel" autocomplete="tel" inputmode="tel" placeholder="Your mobile number">
+          <p class="ferr" id="err-suPhone" hidden></p>
+        </div>
+        <div class="field">
+          <label for="suPw">Password</label>
+          <div class="pw-wrap">
+            <input id="suPw" type="password" autocomplete="new-password" placeholder="At least 6 characters">
+            <button type="button" class="pw-toggle" data-target="suPw" aria-label="Show password"></button>
+          </div>
+          <p class="ferr" id="err-suPw" hidden></p>
+        </div>
+        <div class="field">
+          <label for="suPw2">Confirm password</label>
+          <div class="pw-wrap">
+            <input id="suPw2" type="password" autocomplete="new-password" placeholder="Type the password again">
+            <button type="button" class="pw-toggle" data-target="suPw2" aria-label="Show password"></button>
+          </div>
+          <p class="ferr" id="err-suPw2" hidden></p>
+        </div>
+        <div class="field" id="suStopField">
+          <label for="suStop">Your stop</label>
+          <select id="suStop"></select>
+          <p class="ferr" id="err-suStop" hidden></p>
+        </div>
+        <p class="auth-err" id="signupErr" role="alert" hidden></p>
+        <button type="submit" class="auth-submit">Create account</button>
+        <p class="switch-hint">Already have an account? <button type="button" id="goLoginLink">Log in</button></p>
+      </form>
+
+      <div class="gate-bottom">
+        <button id="adminLink" type="button" class="admin-link">Admin login</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="gateAdmin" class="admin-gate" hidden>
+    <div class="admin-col">
+      <button id="adminBack" type="button" class="admin-back">&#8592; Back to login</button>
+      <div class="admin-card">
+        <div class="admin-eyebrow">बसaarah · Restricted</div>
+        <h2 class="admin-h">Admin</h2>
+        <p class="admin-sub">Transport office access only. There is no sign-up for admin accounts.</p>
+        <form id="adminForm" novalidate>
+          <div class="field">
+            <label for="admLoginId">Admin ID</label>
+            <input id="admLoginId" type="text" autocomplete="username" placeholder="Admin ID">
+            <p class="ferr" id="err-admLoginId" hidden></p>
+          </div>
+          <div class="field">
+            <label for="admLoginPw">Password</label>
+            <div class="pw-wrap">
+              <input id="admLoginPw" type="password" autocomplete="current-password" placeholder="Password">
+              <button type="button" class="pw-toggle" data-target="admLoginPw" aria-label="Show password"></button>
+            </div>
+            <p class="ferr" id="err-admLoginPw" hidden></p>
+          </div>
+          <p class="auth-err" id="adminErr" role="alert" hidden></p>
+          <button type="submit" class="admin-submit">Log in as Admin</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
 <div class="wrap">
   <h1 class="title">Your bus, live — <em>no more guessing</em> at the stop</h1>
   <p class="lede">Watch your bus moving on the map towards your stop — like tracking a cab. See how many buses have already passed your stop, how many are still coming, and when the next one reaches you. Any bus that comes, you can board: no bus number is assigned to any student.</p>
@@ -2154,7 +2361,6 @@ function renderAll(draw=true){ placeControls(); renderSelectors(); if(state.role
   // Keep shared panels fresh when switching roles
   if(state.role!=="student"){ const keep=state.role; }
 }
-document.querySelectorAll(".role").forEach(b=>b.addEventListener("click",()=>{document.querySelectorAll(".role").forEach(x=>x.classList.remove("active"));b.classList.add("active");state.role=b.dataset.role;document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));$("view-"+state.role).classList.add("active");renderAll(); if(state.role==="student") setTimeout(()=>{ if(curDrawn) drawMap(curDrawn.route); },60);}));
 document.querySelectorAll(".trip").forEach(b=>b.addEventListener("click",()=>{document.querySelectorAll(".trip").forEach(x=>x.classList.remove("active"));b.classList.add("active");state.trip=+b.dataset.trip;renderAll();}));
 $("routeSel").addEventListener("change",e=>{state.routeId=e.target.value;
   // Reverse flow: never leave a stop selected that this route doesn't serve —
@@ -2422,6 +2628,262 @@ function enhanceSelect(sel){
   sel.addEventListener("change",syncLabel);
   syncLabel(); buildList();
 }
+
+// ================= Auth gate (100% client-side demo) =================
+// Accounts live in localStorage on THIS device only (key basaarah_users);
+// the signed-in email lives in basaarah_session (a special marker for the
+// preset admin). Passwords are stored only as a simple one-way hash, never
+// in plaintext. No server, no network — the page stays a single static
+// file. The gate comes first: the app stays hidden until login / signup.
+(function(){
+  var UKEY="basaarah_users", SKEY="basaarah_session", ADMIN_SESSION="__admin__";
+  var ADMIN_ID="admin", ADMIN_PW_HASH="v1$bp9x6x$9got11$15"; // hash of the preset demo admin password (same hashPw as accounts); the password itself is not in this file
+  var authView=$("authView"), authUser=$("authUser"),
+      userMenu=$("userMenu"), loginForm=$("loginForm"), signupForm=$("signupForm"),
+      adminForm=$("adminForm"), gateMain=$("gateMain"), gateAdmin=$("gateAdmin");
+  if(!authView||!loginForm||!signupForm) return;
+  var currentUser=null, authRole="student", authTab="login";
+
+  function loadUsers(){ try{ var u=JSON.parse(localStorage.getItem(UKEY)); return Array.isArray(u)?u:[]; }catch(e){ return []; } }
+  function saveUsers(u){ try{ localStorage.setItem(UKEY, JSON.stringify(u)); }catch(e){} }
+  // Simple FNV-1a + djb2 mix hash (demo-grade obfuscation, not real security).
+  function hashPw(pw,email){
+    var s=String(email).toLowerCase()+"::"+String(pw), h1=0x811c9dc5, h2=5381;
+    for(var i=0;i<s.length;i++){ var c=s.charCodeAt(i); h1=Math.imul(h1^c,0x01000193); h2=(Math.imul(h2,33)^c)|0; }
+    return "v1$"+(h1>>>0).toString(36)+"$"+(h2>>>0).toString(36)+"$"+s.length;
+  }
+  function findUser(email){ email=String(email||"").trim().toLowerCase(); return loadUsers().filter(function(u){return u.email===email;})[0]||null; }
+  function getSession(){ try{ return localStorage.getItem(SKEY)||""; }catch(e){ return ""; } }
+  function setSession(v){ try{ if(v) localStorage.setItem(SKEY,v); else localStorage.removeItem(SKEY); }catch(e){} }
+  // Accounts made before roles existed have no role field: they are Students.
+  function userRole(u){ if(!u) return "student"; if(u.admin||u.role==="admin") return "admin"; return u.role==="driver"?"driver":"student"; }
+
+  // Preselect the user's home stop (Student view) — called only on load /
+  // login / signup, never on the 5s tick, so a stop the user then picks
+  // manually is never overridden.
+  function applyHomeStop(user){
+    if(!user||!user.stop) return;
+    var names=allStopsUnique();
+    var match=names.filter(function(n){ return canon(n)===canon(user.stop); })[0];
+    if(!match) return;
+    state.stopName=match;
+    var serving=routesServing(match);
+    if(serving.length && !serving.some(function(r){ return r.id===state.routeId; })) state.routeId=serving[0].id;
+  }
+
+  // Land inside the app on the signed-in role's own view. There is no
+  // in-app view switcher: the session role alone decides the view, and
+  // switching roles means logging out and back in through the gate.
+  function setRoleView(role){
+    state.role=role;
+    document.querySelectorAll(".view").forEach(function(v){ v.classList.remove("active"); });
+    var view=$("view-"+role); if(view) view.classList.add("active");
+  }
+
+  function renderAuthHeader(){
+    if(currentUser){
+      authUser.hidden=false;
+      var r=userRole(currentUser);
+      var first=r==="admin" ? "Admin" : (currentUser.name||"?").trim().split(/\s+/)[0];
+      $("userName").textContent=first;
+      $("userAvatar").textContent=first.charAt(0).toUpperCase()||"?";
+      $("userMenuStop").textContent = r==="admin" ? "Admin access" : r==="driver" ? "Driver account" : "Home stop: "+(currentUser.stop||"—");
+    }else{
+      authUser.hidden=true; userMenu.hidden=true;
+      $("userChip").setAttribute("aria-expanded","false");
+    }
+  }
+  function showGate(){
+    authView.hidden=false; document.body.classList.add("auth-open");
+    gateMain.hidden=false; gateAdmin.hidden=true;
+    window.scrollTo(0,0);
+  }
+  function hideGate(){
+    authView.hidden=true; document.body.classList.remove("auth-open");
+  }
+  function signIn(user){
+    currentUser=user; setSession(userRole(user)==="admin" ? ADMIN_SESSION : user.email);
+    var r=userRole(user);
+    if(r==="student") applyHomeStop(user);
+    setRoleView(r);
+    renderAuthHeader(); hideGate(); renderAll();
+    if(r==="student") setTimeout(function(){ if(curDrawn) drawMap(curDrawn.route); },60);
+  }
+  function signOut(){
+    currentUser=null; setSession(""); renderAuthHeader(); showGate();
+  }
+
+  function updateHeadings(){
+    var driver=authRole==="driver";
+    $("authHeading").textContent = "Welcome to बसaarah";
+    $("authSub").textContent = "Your AJU bus, live — know it’s coming, or know it’s gone.";
+    var lb=$("loginSubmit"); if(lb) lb.textContent = driver ? "Log in as Driver" : "Log in";
+  }
+  function setAuthRole(role){
+    authRole=role;
+    $("roleCardStudent").classList.toggle("selected", role==="student");
+    $("roleCardDriver").classList.toggle("selected", role==="driver");
+    $("roleCardStudent").setAttribute("aria-pressed", role==="student"?"true":"false");
+    $("roleCardDriver").setAttribute("aria-pressed", role==="driver"?"true":"false");
+    $("suPhoneField").hidden = role!=="driver";
+    $("suStopField").hidden = role!=="student";
+    clearErr(signupForm);
+    updateHeadings();
+  }
+  function switchTab(tab){
+    authTab=tab;
+    var login=tab!=="signup";
+    loginForm.hidden=!login; signupForm.hidden=login;
+    $("tabLogin").classList.toggle("active",login); $("tabSignup").classList.toggle("active",!login);
+    $("tabLogin").setAttribute("aria-selected",login?"true":"false");
+    $("tabSignup").setAttribute("aria-selected",login?"false":"true");
+    clearErr(loginForm); clearErr(signupForm);
+    updateHeadings();
+  }
+  function setErr(id,msg){
+    var e=$(id); if(!e) return;
+    e.textContent=msg||""; e.hidden=!msg;
+  }
+  function fieldErr(inputId,msg){
+    var inp=$(inputId); if(inp){ inp.setAttribute("aria-invalid", msg?"true":"false"); }
+    setErr("err-"+inputId,msg);
+  }
+  function clearErr(form){
+    if(!form) return;
+    form.querySelectorAll(".ferr").forEach(function(e){ e.textContent=""; e.hidden=true; });
+    form.querySelectorAll("[aria-invalid]").forEach(function(i){ i.removeAttribute("aria-invalid"); });
+    var g=form.querySelector(".auth-err"); if(g){ g.textContent=""; g.hidden=true; }
+  }
+  function formErr(form,msg){ var g=form.querySelector(".auth-err"); if(g){ g.textContent=msg; g.hidden=false; } }
+  var EMAIL_RE=/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+  // Populate the signup stop list from the site's own stop list and give it
+  // the site's custom dropdown treatment.
+  (function(){
+    var sel=$("suStop"); if(!sel) return;
+    sel.innerHTML=allStopsUnique().map(function(n){ return '<option value="'+n.replace(/"/g,"&quot;")+'">'+n+"</option>"; }).join("");
+    sel.value=LAL;
+    if(typeof enhanceSelect==="function") enhanceSelect(sel);
+  })();
+
+  $("roleCardStudent").addEventListener("click",function(){ setAuthRole("student"); });
+  $("roleCardDriver").addEventListener("click",function(){ setAuthRole("driver"); });
+  $("tabLogin").addEventListener("click",function(){ switchTab("login"); });
+  $("tabSignup").addEventListener("click",function(){ switchTab("signup"); });
+  $("goSignupLink").addEventListener("click",function(){ switchTab("signup"); });
+  $("goLoginLink").addEventListener("click",function(){ switchTab("login"); });
+  $("adminLink").addEventListener("click",function(){
+    clearErr(adminForm);
+    gateMain.hidden=true; gateAdmin.hidden=false; window.scrollTo(0,0);
+    var f=$("admLoginId"); if(f) setTimeout(function(){ f.focus(); },30);
+  });
+  $("adminBack").addEventListener("click",function(){
+    gateAdmin.hidden=true; gateMain.hidden=false; window.scrollTo(0,0);
+  });
+
+  var EYE='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/></svg>';
+  var EYE_OFF='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4l16 16"/><path d="M9.9 5.9A9.4 9.4 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a17.6 17.6 0 0 1-3.3 3.9M6 8A16.9 16.9 0 0 0 2.5 12S6 18.5 12 18.5c1.2 0 2.3-.3 3.3-.7"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>';
+  document.querySelectorAll(".pw-toggle").forEach(function(btn){
+    btn.innerHTML=EYE;
+    btn.addEventListener("click",function(){
+      var inp=$(btn.dataset.target); if(!inp) return;
+      var show=inp.type==="password";
+      inp.type=show?"text":"password";
+      btn.innerHTML=show?EYE_OFF:EYE;
+      btn.setAttribute("aria-label",(show?"Hide":"Show")+" password");
+    });
+  });
+
+  $("userChip").addEventListener("click",function(){
+    var open=userMenu.hidden;
+    userMenu.hidden=!open;
+    $("userChip").setAttribute("aria-expanded",open?"true":"false");
+  });
+  document.addEventListener("pointerdown",function(e){
+    if(!userMenu.hidden && !$("authUser").contains(e.target)){ userMenu.hidden=true; $("userChip").setAttribute("aria-expanded","false"); }
+  });
+  $("logoutBtn").addEventListener("click",function(){ signOut(); });
+
+  signupForm.addEventListener("submit",function(e){
+    e.preventDefault(); clearErr(signupForm);
+    var driver=authRole==="driver";
+    var name=$("suName").value.trim(), email=$("suEmail").value.trim().toLowerCase(),
+        pw=$("suPw").value, pw2=$("suPw2").value,
+        phone=$("suPhone").value.trim(), stop=$("suStop").value;
+    var bad=false;
+    if(!name){ fieldErr("suName","Please enter your full name."); bad=true; }
+    if(!email){ fieldErr("suEmail","Please enter your email."); bad=true; }
+    else if(!EMAIL_RE.test(email)){ fieldErr("suEmail","That doesn't look like a valid email address."); bad=true; }
+    if(driver){
+      var digits=phone.replace(/\D/g,"");
+      if(!phone){ fieldErr("suPhone","Please enter your phone number."); bad=true; }
+      else if(digits.length<10||digits.length>13){ fieldErr("suPhone","That doesn't look like a valid phone number."); bad=true; }
+    }
+    if(!pw){ fieldErr("suPw","Please choose a password."); bad=true; }
+    else if(pw.length<6){ fieldErr("suPw","Password must be at least 6 characters."); bad=true; }
+    if(!pw2){ fieldErr("suPw2","Please type the password again."); bad=true; }
+    else if(pw&&pw2!==pw){ fieldErr("suPw2","Passwords don't match."); bad=true; }
+    if(!driver && !stop){ fieldErr("suStop","Please pick your stop."); bad=true; }
+    if(bad) return;
+    if(findUser(email)){
+      fieldErr("suEmail","An account with this email already exists.");
+      formErr(signupForm,"This email is already registered — try logging in instead.");
+      return;
+    }
+    var user = driver
+      ? {name:name, email:email, pw:hashPw(pw,email), role:"driver", phone:phone}
+      : {name:name, email:email, pw:hashPw(pw,email), role:"student", stop:stop};
+    var users=loadUsers(); users.push(user); saveUsers(users);
+    signIn(user);
+  });
+
+  loginForm.addEventListener("submit",function(e){
+    e.preventDefault(); clearErr(loginForm);
+    var email=$("liEmail").value.trim().toLowerCase(), pw=$("liPw").value;
+    var bad=false;
+    if(!email){ fieldErr("liEmail","Please enter your email."); bad=true; }
+    else if(!EMAIL_RE.test(email)){ fieldErr("liEmail","That doesn't look like a valid email address."); bad=true; }
+    if(!pw){ fieldErr("liPw","Please enter your password."); bad=true; }
+    if(bad) return;
+    var user=findUser(email);
+    if(!user || user.pw!==hashPw(pw,email)){
+      formErr(loginForm,"Wrong email or password. Check both and try again.");
+      return;
+    }
+    signIn(user);
+  });
+
+  adminForm.addEventListener("submit",function(e){
+    e.preventDefault(); clearErr(adminForm);
+    var id=$("admLoginId").value.trim(), pw=$("admLoginPw").value;
+    var bad=false;
+    if(!id){ fieldErr("admLoginId","Please enter the admin ID."); bad=true; }
+    if(!pw){ fieldErr("admLoginPw","Please enter the password."); bad=true; }
+    if(bad) return;
+    if(id!==ADMIN_ID || hashPw(pw,ADMIN_ID)!==ADMIN_PW_HASH){
+      formErr(adminForm,"Wrong admin ID or password. Check both and try again.");
+      return;
+    }
+    signIn({name:"Admin", email:ADMIN_SESSION, role:"admin", admin:true});
+  });
+
+  // Initialise the gate UI, then restore a saved session: with one, the
+  // app opens straight at that user's role view; without one, the gate
+  // is the first thing shown and the app stays hidden behind it.
+  setAuthRole("student"); switchTab("login");
+  var sess=getSession();
+  if(sess===ADMIN_SESSION){ currentUser={name:"Admin", email:ADMIN_SESSION, role:"admin", admin:true}; }
+  else if(sess){ var u=findUser(sess); if(u){ currentUser=u; } else setSession(""); }
+  if(currentUser){
+    if(userRole(currentUser)==="student") applyHomeStop(currentUser);
+    setRoleView(userRole(currentUser));
+    hideGate();
+  }else{
+    showGate();
+  }
+  renderAuthHeader();
+})();
+
 ["stopSel","routeSel","admDelayRoute"].forEach(function(id){ enhanceSelect($(id)); });
 renderAll(); tick();
 setInterval(()=>{tick(); renderAll();},5000);
