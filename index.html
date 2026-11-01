@@ -2009,10 +2009,10 @@ function pointAlongPath(path,f){
   }
   const last=path[path.length-1]; return {lat:last[0],lon:last[1]};
 }
-function busPosition(route){
+function busPosition(route,skipGps){
   // Interpolate along pinned stops by real time (College -> stops -> College)
   const stops=routeStops(route), now=nowMin(), d=delayOf(route.id);
-  const gps=gpsFor(route);
+  const gps=skipGps?null:gpsFor(route);
   if(gps){
     // Fresh GPS wins unconditionally: a fresh position from the
     // driver's phone is the bus's real place, regardless of the trip
@@ -2051,6 +2051,9 @@ function busPosition(route){
   }
   return {...pinned[pinned.length-1],status:"Completed — reached College",src:"schedule"};
 }
+// A fresh fix farther than this from the route's baked line is not on
+// this route, so its projection must not drive verdicts.
+const OFF_ROUTE_M=250;
 // ---- Live-GPS passed/coming determination ----
 // The marker position already obeyed fresh GPS, but every passed/coming
 // verdict was computed from the clock + chart alone — so a bus running
@@ -2173,6 +2176,7 @@ function liveProgressFor(route,stopName){
   const schedAlong=scheduleAlongKm(route,stops,linePts,cum,now);
   const proj=projectAlongPath(linePts,cum,gps.lat,gps.lon,schedAlong,gps.heading);
   if(!proj) return null;
+  if(proj.offKm>OFF_ROUTE_M/1000) return null;
   const sel=stops.find(function(s){ return canon(s.n)===canon(stopName||state.stopName); });
   let stopAlong=null;
   if(sel&&sel.lat!==null&&sel.lon!==null) stopAlong=vertexAlongKm(linePts,cum,sel.lat,sel.lon,canon(sel.n)===canon("Gamaharia Campus"));
@@ -2370,8 +2374,15 @@ function splitLineLast(linePts,pos){
 // coming to the student's stop any more. Once the trip ends at Campus
 // the whole line is the light travelled grey.
 function lineParts(route,stops,linePts,pos){
+  // Split at the schedule position when the live position is off-route:
+  // an off-route fix must not paint progress along a road it is not on.
+  let splitPos=pos;
+  if(splitPos&&linePts&&linePts.length>=2){
+    const splitProj=projectAlongPath(linePts,cumDistKm(linePts),splitPos.lat,splitPos.lon,null,null);
+    if(splitProj&&splitProj.offKm>OFF_ROUTE_M/1000) splitPos=busPosition(route,true);
+  }
   if(!selectedStopPassed(route,stops)){
-    const sp=splitLine(linePts,pos);
+    const sp=splitLine(linePts,splitPos);
     return {done:sp.done,tail:null,todo:sp.todo};
   }
   // Trip-done is judged from the schedule alone (live times), never
@@ -2381,9 +2392,9 @@ function lineParts(route,stops,linePts,pos){
   // the line state exactly as the schedule-only position gave it.
   const list=stops||routeStops(route);
   const times=list.map(function(s){ return liveTime(route,s); }).filter(function(t){ return t!==null; });
-  const tripDone=!pos||(times.length>0&&nowMin()>Math.max.apply(null,times));
+  const tripDone=!splitPos||(times.length>0&&nowMin()>Math.max.apply(null,times));
   if(tripDone) return {done:linePts.slice(),tail:null,todo:[]};
-  const sp=splitLineLast(linePts,pos);
+  const sp=splitLineLast(linePts,splitPos);
   return {done:sp.done,tail:sp.todo,todo:[]};
 }
 function pinHTML(s){
@@ -2703,7 +2714,7 @@ function syncStudentMap(route,stops,pinned,linePts,pos){
     } else if(html!==S.selBusHtml){ S.selBus.setIcon(selBusIcon(html)); S.selBusHtml=html; }
     const isGps=pos.src==="gps", gpsS=isGps?gpsFor(route):null, cumS=cumDistKm(linePts);
     let alongS=null;
-    { const pr=projectAlongPath(linePts,cumS,pos.lat,pos.lon,isGps?scheduleAlongKm(route,stops,linePts,cumS,now):null,gpsS?gpsS.heading:null); if(pr) alongS=pr.along; }
+    { const pr=projectAlongPath(linePts,cumS,pos.lat,pos.lon,isGps?scheduleAlongKm(route,stops,linePts,cumS,now):null,gpsS?gpsS.heading:null); if(pr&&pr.offKm<=OFF_ROUTE_M/1000) alongS=pr.along; }
     glideDrive("S:sel",S.selBus,{lat:pos.lat,lon:pos.lon},{source:isGps?"gps":"schedule",updatedAt:isGps?pos.updated_at:null,path:linePts,cum:cumS,along:alongS,pathKey:route.id+"|"+state.trip});
     const elm=S.selBus.getElement(); if(elm) elm.title=(busLabelFor(route,state.trip)||route.id)+" • "+route.id+" — "+pos.status;
   } else {
@@ -2722,7 +2733,7 @@ function syncStudentMap(route,stops,pinned,linePts,pos){
     } else if(ex.html!==ic.html){ ex.m.setIcon(ic.icon); ex.html=ic.html; }
     const oIsGps=o.p.src==="gps", oLine=routeLine(o.b.route), oCum=cumDistKm(oLine), oGps=oIsGps?gpsFor(o.b.route):null;
     let oAlong=null;
-    { const pr=projectAlongPath(oLine,oCum,o.p.lat,o.p.lon,oIsGps?scheduleAlongKm(o.b.route,routeStops(o.b.route),oLine,oCum,now):null,oGps?oGps.heading:null); if(pr) oAlong=pr.along; }
+    { const pr=projectAlongPath(oLine,oCum,o.p.lat,o.p.lon,oIsGps?scheduleAlongKm(o.b.route,routeStops(o.b.route),oLine,oCum,now):null,oGps?oGps.heading:null); if(pr&&pr.offKm<=OFF_ROUTE_M/1000) oAlong=pr.along; }
     glideDrive("S:"+o.b.route.id,S.others[o.b.route.id].m,{lat:o.p.lat,lon:o.p.lon},{source:oIsGps?"gps":"schedule",updatedAt:oIsGps?o.p.updated_at:null,path:oLine,cum:oCum,along:oAlong,pathKey:o.b.route.id+"|"+state.trip});
     const elm=S.others[o.b.route.id].m.getElement(); if(elm) elm.title=o.b.busNo+" • "+o.b.route.id+" — "+o.p.status;
   });
@@ -3130,6 +3141,7 @@ function driverProgressFor(route){
   const schedAlong=scheduleAlongKm(route,stops,linePts,cum,now);
   const proj=projectAlongPath(linePts,cum,own.lat,own.lon,schedAlong,heading);
   if(!proj) return null;
+  if(proj.offKm>OFF_ROUTE_M/1000) return null;
   // Direct along-route positions from the geometry vertices; a
   // coordinate-bearing stop that is not a vertex within 2 m falls back
   // to its nearest-point projection onto the same geometry.
@@ -3198,7 +3210,14 @@ function drawDriverMap(route,nextName){
   const cw=el.clientWidth, ch=el.clientHeight;
   if(!cw||!ch){ D.wasHidden=true; return; }
   if(D.wasHidden||cw!==D.sizeW||ch!==D.sizeH){ D.sizeW=cw; D.sizeH=ch; D.wasHidden=false; D.map.invalidateSize(); }
-  const sp=splitLine(linePts,pos);
+  // Split at the schedule position when the held position is off-route;
+  // the marker below still draws at the true position.
+  let drvSplitPos=pos;
+  if(drvSplitPos&&linePts.length>=2){
+    const drvSplitProj=projectAlongPath(linePts,cumDistKm(linePts),drvSplitPos.lat,drvSplitPos.lon,null,null);
+    if(drvSplitProj&&drvSplitProj.offKm>OFF_ROUTE_M/1000) drvSplitPos=busPosition(route,true);
+  }
+  const sp=splitLine(linePts,drvSplitPos);
   D.halo.setLatLngs(linePts);
   D.done.setLatLngs(sp.done||[]);
   D.todo.setLatLngs(sp.todo);
@@ -3459,7 +3478,7 @@ function drawAdminMap(){
       }
       { const aIsGps=res.source==="gps", aLine=al?routeLine(al.route):null, aCum=aLine?cumDistKm(aLine):null, aLoc=aIsGps?OPS.locations[selBus.id]:null;
         let aAlong=null;
-        if(aLine){ const pr=projectAlongPath(aLine,aCum,res.lat,res.lon,aIsGps?scheduleAlongKm(al.route,routeStops(al.route),aLine,aCum,nowMin()):null,aLoc?aLoc.heading:null); if(pr) aAlong=pr.along; }
+        if(aLine){ const pr=projectAlongPath(aLine,aCum,res.lat,res.lon,aIsGps?scheduleAlongKm(al.route,routeStops(al.route),aLine,aCum,nowMin()):null,aLoc?aLoc.heading:null); if(pr&&pr.offKm<=OFF_ROUTE_M/1000) aAlong=pr.along; }
         glideDrive("A:"+key,A.markers[key].m,{lat:res.lat,lon:res.lon},{source:aIsGps?"gps":"schedule",updatedAt:aIsGps?res.updated_at:null,path:aLine,cum:aCum,along:aAlong,pathKey:key+"|"+state.trip});
       }
       const elm=A.markers[key].m.getElement(); if(elm) elm.title="Bus "+busNumText(selBus.number)+" — "+admBusStatusLine(selBus,res);
@@ -3494,7 +3513,7 @@ function drawAdminMap(){
     }
     { const fIsGps=pos.src==="gps", fLine=routeLine(r), fCum=cumDistKm(fLine), fGps=fIsGps?gpsFor(r):null;
       let fAlong=null;
-      const pr=projectAlongPath(fLine,fCum,pos.lat,pos.lon,fIsGps?scheduleAlongKm(r,routeStops(r),fLine,fCum,nowMin()):null,fGps?fGps.heading:null); if(pr) fAlong=pr.along;
+      const pr=projectAlongPath(fLine,fCum,pos.lat,pos.lon,fIsGps?scheduleAlongKm(r,routeStops(r),fLine,fCum,nowMin()):null,fGps?fGps.heading:null); if(pr&&pr.offKm<=OFF_ROUTE_M/1000) fAlong=pr.along;
       glideDrive("A:"+r.id,A.markers[r.id].m,{lat:pos.lat,lon:pos.lon},{source:fIsGps?"gps":"schedule",updatedAt:fIsGps?pos.updated_at:null,path:fLine,cum:fCum,along:fAlong,pathKey:r.id+"|"+state.trip});
     }
     const elm=A.markers[r.id].m.getElement(); if(elm) elm.title=(busLabelFor(r,state.trip)||r.id)+" • "+r.id+" — "+pos.status;
