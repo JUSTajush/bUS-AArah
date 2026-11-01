@@ -1041,6 +1041,11 @@ body.is-admin #view-admin{margin-top:2px}
 .b-grey{background:var(--surface2);color:var(--muted)}
 @media(prefers-color-scheme:dark){.b-amber,.b-red{background:#f4f4f2;color:#000}}
 .rowitem{display:flex;justify-content:space-between;gap:10px;border:1px solid var(--line);border-radius:14px;padding:11px 13px;align-items:center;background:var(--surface)}
+/* The fleet-list row of the bus picked in the admin fleet-map selector:
+   a soft tint plus the brand-amber edge, so the eye can follow the
+   selection from the map down into the lists. All-buses mode highlights
+   nothing. */
+.rowitem.fleet-sel{background:var(--surface2);box-shadow:inset 3px 0 0 #f5a623}
 .stoplist{display:grid;gap:0;margin-top:8px}
 .stoprow{display:flex;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);align-items:flex-start}
 .stoprow:last-child{border-bottom:0}
@@ -1478,6 +1483,11 @@ select.admsel{padding:10px 14px;border-radius:999px;border:1px solid var(--line)
           <button class="atrip" data-atrip="1" type="button">Morning 2nd Trip</button>
           <button class="atrip" data-atrip="2" type="button">Afternoon</button>
         </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px">
+          <span class="sub" style="font-weight:700">Bus on the map</span>
+          <select class="admsel" id="admBusSel" aria-label="Bus to show on the fleet map"></select>
+        </div>
+        <p class="sub" id="admBusStatus" style="margin-top:10px" hidden></p>
         <div id="admMap" style="margin-top:12px" role="application" aria-label="Live fleet map for the admin — every bus on every route, interactive Leaflet map"></div>
         <p class="sub" id="admMapNote" style="margin-top:10px"></p>
       </div>
@@ -1569,7 +1579,7 @@ async function sbRest(path, opts){
   if(opts.body!==undefined){ headers["Content-Type"]="application/json"; body=JSON.stringify(opts.body); }
   if(opts.prefer) headers["Prefer"]=opts.prefer;
   let res, data=null;
-  try{ res=await fetch(SB_URL+"/rest/v1/"+path,{method:opts.method||"GET",headers:headers,body:body}); }
+  try{ res=await fetch(SB_URL+"/rest/v1/"+path,{method:opts.method||"GET",headers:headers,body:body,cache:"no-store"}); }
   catch(e){ const err=new Error("Couldn't reach the database — check your connection and try again."); err.network=true; throw err; }
   const txt=await res.text();
   try{ data=txt?JSON.parse(txt):null; }catch(e){ data=null; }
@@ -1631,7 +1641,7 @@ function stopSlugFor(name){ if(!name) return null; return STOP_SLUG_BY_NAME[cano
 function allotFor(route, tripIdx){ const tid=tripIdFor(route, tripIdx==null?state.trip:tripIdx); const a=OPS.allotByTrip[tid]; if(!a) return null; const bus=OPS.buses.filter(function(b){ return b.id===a.bus_id; })[0]||null; return {allot:a, bus:bus, label: bus?("Bus "+busNumText(bus.number)):null}; }
 function busLabelFor(route, tripIdx){ const a=allotFor(route, tripIdx); return a&&a.label?a.label:null; }
 function chipFor(routeId){ const r=DATA.routes.filter(function(x){ return x.id===routeId; })[0]; const lbl=r?busLabelFor(r,state.trip):null; return lbl||String(routeId).replace(/^Route /,"R"); }
-function gpsFor(route){ const a=allotFor(route,state.trip); if(!a||!a.bus) return null; const loc=OPS.locations[a.bus.id]; if(!loc||loc.lat==null||loc.lng==null) return null; const age=(Date.now()-new Date(loc.updated_at).getTime())/1000; if(!(age>=0&&age<=180)) return null; return {lat:loc.lat, lon:loc.lng, age:age, updated_at:loc.updated_at, bus:a.bus}; }
+function gpsFor(route){ const a=allotFor(route,state.trip); if(!a||!a.bus) return null; const loc=OPS.locations[a.bus.id]; if(!loc||loc.lat==null||loc.lng==null) return null; const age=(Date.now()-new Date(loc.updated_at).getTime())/1000; if(!(age>=0&&age<=180)) return null; return {lat:loc.lat, lon:loc.lng, age:age, updated_at:loc.updated_at, bus:a.bus, speed_kmh:loc.speed_kmh, heading:loc.heading}; }
 function nearestStopName(lat, lon, stops){ let best=null, bd=Infinity; stops.forEach(function(s){ if(s.lat==null||s.lon==null) return; const d=havKm(lat,lon,s.lat,s.lon); if(d<bd){ bd=d; best=s; } }); return best?best.n:"Gamaria Campus"; }
 function initialTripFor(now){ if(now<8*60+30) return 0; if(now<10*60+45) return 1; return 2; }
 function syncTripButtons(){ document.querySelectorAll("#tripBtns .trip").forEach(function(x){ x.classList.toggle("active", +x.dataset.trip===state.trip); }); document.querySelectorAll("#admTripBtns .atrip").forEach(function(x){ x.classList.toggle("active", +x.dataset.atrip===state.trip); }); }
@@ -1684,20 +1694,39 @@ async function loadChartFromDB(){
 // Shared operations data: today's allotments and delays, the fleet list
 // and the latest GPS positions. Polled every ~20s so an admin edit or a
 // driver position shows up on every device.
+let opsSeq=0;
 async function loadOps(){
   const today=todayIST();
-  try{
-    const buses=await sbRest("buses?select=id,number,active&order=number&limit=200");
-    const allot=await sbRest("allotments?select=id,service_date,trip_id,bus_id&service_date=eq."+today+"&limit=200");
-    const delays=await sbRest("delays?select=id,service_date,route_id,minutes,created_at&service_date=eq."+today+"&order=created_at.desc&limit=200");
-    const locs=await sbRest("bus_locations?select=bus_id,lat,lng,speed_kmh,heading,updated_at&limit=200");
-    OPS.buses=Array.isArray(buses)?buses:[];
-    OPS.allotByTrip={}; (Array.isArray(allot)?allot:[]).forEach(function(a){ OPS.allotByTrip[a.trip_id]=a; });
-    OPS.delays={}; (Array.isArray(delays)?delays:[]).forEach(function(d){ if(!(d.route_id in OPS.delays)) OPS.delays[d.route_id]=d.minutes; });
-    OPS.locations={}; (Array.isArray(locs)?locs:[]).forEach(function(l){ OPS.locations[l.bus_id]=l; });
-    OPS.loaded=true; OPS.error="";
-    renderAll();
-  }catch(e){ OPS.error=String((e&&e.message)||e); }
+  const mySeq=++opsSeq;
+  // A poll must never die on an expired token: refresh first (best
+  // effort — a failure here still falls back to the anon key for the
+  // public reads below, exactly as sbRest does without a session).
+  try{ await sbEnsureFresh(); }catch(e){}
+  let failed=false;
+  async function get(path){
+    if(mySeq!==opsSeq) return null;
+    try{ return await sbRest(path); }
+    catch(e){ failed=true; OPS.error=String((e&&e.message)||e); return null; }
+  }
+  // Each dataset is applied as soon as it arrives. The old version
+  // fetched all four in sequence and only assigned anything after
+  // ALL of them succeeded, so one transient failure (e.g. the delays
+  // endpoint) threw the fresh bus_locations away with it and the
+  // markers froze at their load-time positions until a fully clean
+  // poll — the freeze the user saw in an open page.
+  const buses=await get("buses?select=id,number,active&order=number&limit=200");
+  if(Array.isArray(buses)) OPS.buses=buses;
+  const allot=await get("allotments?select=id,service_date,trip_id,bus_id&service_date=eq."+today+"&limit=200");
+  if(Array.isArray(allot)){ OPS.allotByTrip={}; allot.forEach(function(a){ OPS.allotByTrip[a.trip_id]=a; }); }
+  const delays=await get("delays?select=id,service_date,route_id,minutes,created_at&service_date=eq."+today+"&order=created_at.desc&limit=200");
+  if(Array.isArray(delays)){ OPS.delays={}; delays.forEach(function(d){ if(!(d.route_id in OPS.delays)) OPS.delays[d.route_id]=d.minutes; }); }
+  const locs=await get("bus_locations?select=bus_id,lat,lng,speed_kmh,heading,updated_at&limit=200");
+  if(Array.isArray(locs)){ OPS.locations={}; locs.forEach(function(l){ OPS.locations[l.bus_id]=l; }); }
+  // A newer poll has started: this one is stale — never let it
+  // overwrite the newer datasets or re-render with old ones.
+  if(mySeq!==opsSeq) return;
+  OPS.loaded=true; if(!failed) OPS.error="";
+  renderAll();
 }
 async function fetchProfile(userId){ await sbEnsureFresh(); const rows=await sbRest("profiles?select=id,role,full_name,phone,home_stop&id=eq."+encodeURIComponent(userId)); return (rows&&rows[0])||null; }
 async function upsertProfile(userId, profile){
@@ -1798,7 +1827,27 @@ function busesAtStop(stopName){
     const s=stops.find(x=>canon(x.n)===k);
     if(!s) return;
     const lt=liveTime(r,s); if(lt===null) return;
-    out.push({route:r, stop:s, live:lt, chart:chartTime(s), eta:Math.round(lt-now), passed:lt<now, busNo:busLabelFor(r,state.trip), delay:delayOf(r.id), request:!!s.request});
+    // Live-GPS verdict: a fresh fix decides passed/coming from real
+    // progress along the route (see liveProgressFor). No fresh fix, or
+    // no measurable stop position on this route -> the schedule
+    // verdict below is used bit-for-bit as before. A live-coming bus
+    // gets a live arrival estimate: remaining road distance divided by
+    // the fix's speed (over 5 km/h) or 20 km/h otherwise. A live-passed
+    // bus keeps its schedule time for display; only its passed state
+    // is live-derived.
+    let live=lt, passed=lt<now, liveGps=false;
+    const prog=liveProgressFor(r,stopName);
+    if(prog&&prog.stopAlong!==null){
+      const diffKm=prog.along-prog.stopAlong;
+      if(diffKm>0.15){ passed=true; }
+      else{
+        passed=false; liveGps=true;
+        const remainingKm=Math.max(0, prog.stopAlong-prog.along);
+        const speed=(prog.gps.speed_kmh&&prog.gps.speed_kmh>5)?prog.gps.speed_kmh:20;
+        live=now+remainingKm/speed*60;
+      }
+    }
+    out.push({route:r, stop:s, live:live, chart:chartTime(s), eta:Math.round(live-now), passed:passed, busNo:busLabelFor(r,state.trip), delay:delayOf(r.id), request:!!s.request, liveGps:liveGps});
   });
   return out.sort((a,b)=>a.live-b.live);
 }
@@ -1851,7 +1900,17 @@ function pathKm(path){ let t=0; for(let i=0;i<path.length-1;i++) t+=havKm(path[i
 function interceptFor(entry,my,now){
   const stops=routeStops(entry.route);
   const myIdx=stops.findIndex(s=>canon(s.n)===canon(state.stopName));
-  const remaining=stops.map((s,i)=>({s:s,i:i,lt:liveTime(entry.route,s)})).filter(x=>x.lt!==null&&x.lt>now&&x.s.lat!==null&&x.s.lon!==null&&canon(x.s.n)!==canon(state.stopName));
+  const prog=liveProgressFor(entry.route,state.stopName);
+  const remaining=stops.map((s,i)=>({s:s,i:i,lt:liveTime(entry.route,s)})).filter(function(x){
+    if(!(x.lt!==null&&x.lt>now&&x.s.lat!==null&&x.s.lon!==null&&canon(x.s.n)!==canon(state.stopName))) return false;
+    // With fresh GPS, a stop the bus has already rolled past in reality
+    // is not a catch stop, even if its schedule time is still ahead.
+    if(prog&&prog.stopAlong!==null){
+      const a=vertexAlongKm(prog.linePts,prog.cum,x.s.lat,x.s.lon,canon(x.s.n)===canon("Gamaharia Campus"));
+      if(a!==null&&a-prog.along<=0.15) return false;
+    }
+    return true;
+  });
   if(!remaining.length) return null;
   const cands=remaining.map(x=>{
     // Road path along this bus's own route from the student's stop to the
@@ -1966,6 +2025,130 @@ function busPosition(route){
   }
   return {...pinned[pinned.length-1],status:"Completed — reached College"};
 }
+// ---- Live-GPS passed/coming determination ----
+// The marker position already obeyed fresh GPS, but every passed/coming
+// verdict was computed from the clock + chart alone — so a bus running
+// late (or after its scheduled trip end) was declared "passed" while its
+// live marker still sat short of the stop. When the allotted bus has a
+// FRESH fix (<=180s, via gpsFor), its real progress along the route
+// decides instead; with no fresh fix every verdict below falls back to
+// the schedule exactly as before.
+//
+// Progress is the fix's distance-along-route on the trip's baked road
+// geometry (routeLine — the same OSRM legs the map draws), compared
+// with the selected stop's distance-along-route on that route. A
+// stop-on-demand stop (e.g. Lal Building on routes whose chart does not
+// name it) is a vertex of that geometry at the position routeStops
+// inserts it, so it is measured the same way as a chart stop. Tolerance
+// is 150 m: within the band the bus is AT the stop, i.e. not passed.
+//
+// The route retraces itself: the outbound road and the road back to
+// Campus run close together, so one fix can sit within metres of two
+// copies of the road at very different along-route distances (the live
+// 15:50 fix is 2 m from the outbound copy and 14 m from the inbound
+// one). A plain nearest-segment projection would then put the bus ~18
+// km back and invent a ~54-minute ETA. Among segments about as close
+// to the fix as the closest one (within 150 m of it), the projection
+// whose along-route distance is closest to the schedule-implied
+// progress (interpolated between the trip's live-time waypoints in
+// along-route space) wins: the schedule is only a tie-breaker between
+// overlapping copies of the same road, never the verdict itself.
+function cumDistKm(path){ const cum=[0]; for(let i=0;i<path.length-1;i++) cum.push(cum[cum.length-1]+havKm(path[i][0],path[i][1],path[i+1][0],path[i+1][1])); return cum; }
+function vertexAlongKm(path,cum,lat,lon,preferLast){
+  let found=null;
+  for(let i=0;i<path.length;i++){ if(havKm(path[i][0],path[i][1],lat,lon)<=0.002){ found=cum[i]; if(!preferLast) return found; } }
+  return found;
+}
+function projectAlongPath(path,cum,lat,lon,preferAlong,headingDeg){
+  const lat0=lat*Math.PI/180, kx=111.32*Math.cos(lat0), ky=110.574;
+  const px=lon*kx, py=lat*ky;
+  let best=null; const cands=[];
+  for(let i=0;i<path.length-1;i++){
+    const ax=path[i][1]*kx, ay=path[i][0]*ky, bx=path[i+1][1]*kx, by=path[i+1][0]*ky;
+    const dx=bx-ax, dy=by-ay, L2=dx*dx+dy*dy||1;
+    let fr=((px-ax)*dx+(py-ay)*dy)/L2; fr=Math.max(0,Math.min(1,fr));
+    const qx=ax+fr*dx, qy=ay+fr*dy, off=Math.hypot(px-qx,py-qy);
+    const cand={along:cum[i]+fr*havKm(path[i][0],path[i][1],path[i+1][0],path[i+1][1]), offKm:off, seg:i, frac:fr};
+    cands.push(cand);
+    if(!best||off<best.offKm) best=cand;
+  }
+  if(!best) return null;
+  // Near-tie disambiguation: when several segments sit about as close
+  // to the fix as the closest one (within 50 m of it — which covers an
+  // on-road fix on a retraced stretch, and a fix off the baked road
+  // where two copies can tie), the schedule-implied progress picks
+  // the copy. The window is deliberately tight: a segment the fix
+  // sits exactly on (0 m) must beat a parallel copy 112 m away even
+  // when the bus is far ahead of schedule, where the schedule prior
+  // alone would favour the wrong copy. Otherwise the single nearest
+  // segment wins.
+  if(preferAlong!==null&&preferAlong!==undefined){
+    let minOff=Infinity; cands.forEach(function(c){ if(c.offKm<minOff) minOff=c.offKm; });
+    let close=cands.filter(function(c){ return c.offKm<=minOff+0.05; });
+    if(close.length>1){
+      // Direction first, when the fix carries one: on a retraced
+      // stretch the two copies are the same physical road in
+      // opposite directions, sometimes within ~16 m of each other,
+      // and a bus far ahead of schedule defeats the schedule prior
+      // (the wrong copy can sit closer to the schedule-implied
+      // progress than the true one). A segment whose bearing is
+      // within 60 degrees of the fix's heading wins over the rest.
+      if(headingDeg!==null&&headingDeg!==undefined&&isFinite(headingDeg)){
+        const aligned=close.filter(function(c){
+          const a=path[c.seg], b=path[c.seg+1];
+          const dLa=(b[0]-a[0])*Math.PI/180, dLo=(b[1]-a[1])*Math.PI/180;
+          const y=Math.sin(dLo)*Math.cos(b[0]*Math.PI/180);
+          const x=Math.cos(a[0]*Math.PI/180)*Math.sin(b[0]*Math.PI/180)-Math.sin(a[0]*Math.PI/180)*Math.cos(b[0]*Math.PI/180)*Math.cos(dLo);
+          const br=(Math.atan2(y,x)*180/Math.PI+360)%360;
+          let diff=((br-headingDeg+540)%360)-180;
+          return Math.cos(diff*Math.PI/180)>=0.5;
+        });
+        if(aligned.length) close=aligned;
+      }
+      close.sort(function(a,b){ return (Math.abs(a.along-preferAlong)-Math.abs(b.along-preferAlong))||(a.offKm-b.offKm); });
+      return close[0];
+    }
+  }
+  return best;
+}
+function scheduleAlongKm(route,stops,linePts,cum,now){
+  const d=delayOf(route.id);
+  const wps=[];
+  const firstT=chartTime(stops[0]);
+  if(firstT!==null) wps.push({t:firstT-20+d, along:0});
+  stops.forEach(function(s){
+    const ct=chartTime(s); if(ct===null||s.lat===null||s.lon===null) return;
+    const a=vertexAlongKm(linePts,cum,s.lat,s.lon,canon(s.n)===canon("Gamaharia Campus"));
+    if(a!==null) wps.push({t:ct+d, along:a});
+  });
+  if(!wps.length) return null;
+  wps.sort(function(a,b){ return a.t-b.t; });
+  if(now<=wps[0].t) return 0;
+  for(let i=0;i<wps.length-1;i++){
+    const a=wps[i], b=wps[i+1];
+    if(now>=a.t&&now<=b.t){ const f=b.t>a.t?(now-a.t)/(b.t-a.t):0; return a.along+f*(b.along-a.along); }
+  }
+  return cum[cum.length-1];
+}
+// Fresh-GPS progress for a route, or null when there is no fresh fix /
+// no usable geometry. stopAlong is the selected stop's along-route
+// distance (null when the stop has no confirmed coordinates on this
+// route, in which case callers fall back to the schedule verdict).
+function liveProgressFor(route,stopName){
+  const gps=gpsFor(route); if(!gps) return null;
+  const stops=routeStops(route);
+  const linePts=routeLine(route);
+  if(linePts.length<2) return null;
+  const cum=cumDistKm(linePts);
+  const schedAlong=scheduleAlongKm(route,stops,linePts,cum,nowMin());
+  const proj=projectAlongPath(linePts,cum,gps.lat,gps.lon,schedAlong,gps.heading);
+  if(!proj) return null;
+  const sel=stops.find(function(s){ return canon(s.n)===canon(stopName||state.stopName); });
+  let stopAlong=null;
+  if(sel&&sel.lat!==null&&sel.lon!==null) stopAlong=vertexAlongKm(linePts,cum,sel.lat,sel.lon,canon(sel.n)===canon("Gamaharia Campus"));
+  return {gps:gps, along:proj.along, offKm:proj.offKm, stopAlong:stopAlong, totalKm:cum[cum.length-1], schedAlong:schedAlong, stops:stops, linePts:linePts, cum:cum};
+}
+
 // Real street map, powered by Leaflet 1.9.4 (bundled with this page above —
 // no CDN). Default base layer is live OpenStreetMap tiles. (CARTO tiles
 // were dropped: that host now returns "API KEY REQUIRED" watermark
@@ -2031,6 +2214,8 @@ function selectedStopPassed(route,stops){
   const list=stops||routeStops(route);
   const sel=list.find(s=>canon(s.n)===canon(state.stopName));
   if(!sel) return false;
+  const prog=liveProgressFor(route,state.stopName);
+  if(prog&&prog.stopAlong!==null) return prog.along-prog.stopAlong>0.15;
   const lt=liveTime(route,sel);
   return lt!==null&&lt<=nowMin();
 }
@@ -2385,7 +2570,7 @@ function syncStudentMap(route,stops,pinned,linePts,pos){
     const selStop=stops.find(s=>canon(s.n)===canon(state.stopName));
     const short=selStop?selStop.n.replace(/^Gamaharia /,""):state.stopName.replace(/^Gamaharia /,"");
     let bub;
-    if(nxtB) bub=esc(short)+' — <span class="mins">'+(nxtB.request?"~":"")+Math.max(1,nxtB.eta)+" min away</span>";
+    if(nxtB) bub=esc(short)+' — <span class="mins">'+((nxtB.request||nxtB.liveGps)?"~":"")+Math.max(1,nxtB.eta)+" min away</span>";
     else if(atStop.length) bub=esc(short)+" — passed "+fmt(atStop[atStop.length-1].live);
     else bub=esc(short)+" — no timed bus this trip";
     if(!S.yourPin){
@@ -2569,7 +2754,7 @@ function renderStudent(){
   // Headline plain sentence — ALWAYS the SELECTED route at the selected stop
   const sel=forRoute[0];
   if(sel && !sel.passed){
-    $("sentence").innerHTML="<b>"+sel.route.id+" bus</b>"+(sel.busNo?" ("+sel.busNo+" today)":"")+" will arrive at <b>"+state.stopName+"</b> stop at <b>"+fmt(sel.live)+"</b> — in about "+sel.eta+" min."+(sel.request?' <span style="font-size:13px;opacity:.85">This is a live estimate, not a chart time: '+state.stopName+' is a request stop on '+sel.route.id+' with no printed chart time — the bus stops here if you are waiting.</span>':"")+(sel.delay?' <span style="font-size:13px;opacity:.85">Includes a +'+sel.delay+' min delay set by the transport admin.</span>':"");
+    $("sentence").innerHTML="<b>"+sel.route.id+" bus</b>"+(sel.busNo?" ("+sel.busNo+" today)":"")+" will arrive at <b>"+state.stopName+"</b> stop at <b>"+fmt(sel.live)+"</b> — in about "+sel.eta+" min."+(sel.request?' <span style="font-size:13px;opacity:.85">This is a live estimate, not a chart time: '+state.stopName+' is a request stop on '+sel.route.id+' with no printed chart time — the bus stops here if you are waiting.</span>':"")+(sel.liveGps&&!sel.request?' <span style="font-size:13px;opacity:.85">This is a live estimate from the bus\'s GPS position, not a chart time.</span>':"")+(sel.delay?' <span style="font-size:13px;opacity:.85">Includes a +'+sel.delay+' min delay set by the transport admin.</span>':"");
   } else if(sel && sel.passed){
     $("sentence").innerHTML="<b>"+sel.route.id+" bus</b>"+(sel.busNo?" ("+sel.busNo+" today)":"")+" has already passed <b>"+state.stopName+"</b> stop — it passed at <b>"+fmt(sel.live)+"</b>."+(sel.request?' <span style="font-size:13px;opacity:.85">That time was a live estimate, not a chart time: this is a request stop on '+sel.route.id+' with no printed chart time.</span>':"")+(sel.delay?' <span style="font-size:13px;opacity:.85">Includes a +'+sel.delay+' min delay set by the transport admin.</span>':"");
   } else {
@@ -2630,7 +2815,7 @@ function renderStudent(){
   $("chipLast").textContent=buses.length?(coming.length?"Not passed":"Passed"):"—";
   $("expComingLbl").textContent="Still coming ("+coming.length+")";
   $("expPassedLbl").textContent="Already passed ("+passed.length+")";
-  const item=b=>`<div class="rowitem"><span><b>${b.route.id} bus</b> ${b.busNo?`<span class="sub">(${b.busNo} today)</span>`:""}${b.request?' <span class="badge b-amber">Request stop</span>':""}${b.delay?' <span class="badge b-red">+'+b.delay+' min delay</span>':""}<br><span class="sub">${b.passed?"Passed at ":"Arrives "}${fmt(b.live)}${b.chart!==null&&!b.request?" • chart "+fmt(b.chart):""}</span></span><span class="badge ${b.passed?"b-grey":"b-green"}">${b.passed?"Passed":b.eta+" min"}</span></div>`;
+  const item=b=>`<div class="rowitem"><span><b>${b.route.id} bus</b> ${b.busNo?`<span class="sub">(${b.busNo} today)</span>`:""}${b.request?' <span class="badge b-amber">Request stop</span>':""}${b.delay?' <span class="badge b-red">+'+b.delay+' min delay</span>':""}<br><span class="sub">${b.passed?"Passed at ":"Arrives "}${(!b.passed&&b.liveGps)?"~":""}${fmt(b.live)}${b.chart!==null&&!b.request?" • chart "+fmt(b.chart):""}</span></span><span class="badge ${b.passed?"b-grey":"b-green"}">${b.passed?"Passed":b.eta+" min"}</span></div>`;
   $("comingList").innerHTML=coming.length?coming.map(item).join(""):'<p class="sub">No buses still coming in this trip.</p>';
   $("passedList").innerHTML=passed.length?passed.map(item).join(""):'<p class="sub">No bus has passed this stop yet in this trip.</p>';
   $("allAtStop").innerHTML=buses.length?buses.map(item).join(""):'<p class="sub">No buses for this stop in this trip.</p>';
@@ -2847,7 +3032,61 @@ function renderDriver(){
 // fleet context. Ticks only move markers; the view is fitted to the whole
 // fleet on first show and when the trip changes, never on a refresh tick,
 // so an admin's pan/zoom persists like the other views'.
-const A={map:null,holder:{map:null},base:null,lineLayer:null,linesKey:"",campus:null,markers:{},fitKey:"",sizeW:0,sizeH:0,wasHidden:true};
+const A={map:null,holder:{map:null},base:null,lineLayer:null,linesKey:"",campus:null,markers:{},fitKey:"",sizeW:0,sizeH:0,wasHidden:true,selBusId:null,framedKey:""};
+// Fleet-map bus selector: "All buses" (selBusId null) is the original
+// whole-fleet view. Picking one bus shows only that bus's marker, frames
+// the camera on it once at selection time, and afterwards ticks only
+// move its marker — the camera is left alone, like the other views.
+function admSelectedBus(){
+  if(!A.selBusId) return null;
+  return OPS.buses.filter(function(b){ return b.id===A.selBusId; })[0]||null;
+}
+// The bus's allotment for the status line: the map's current trip first,
+// then any other trip today (the same lookup the fleet list uses).
+function admBusAllotment(bus){
+  for(let i=0;i<DATA.routes.length;i++){
+    const a=allotFor(DATA.routes[i],state.trip);
+    if(a&&a.bus&&a.bus.id===bus.id) return {route:DATA.routes[i],kind:state.trip};
+  }
+  const at=allotmentTripForBus(bus.id);
+  return at?{route:at.route,kind:at.kind}:null;
+}
+// Resolve one bus to a position with the fleet map's own rule: a fresh
+// GPS fix (<=180 s, straight from bus_locations) wins; otherwise the
+// schedule position of its allotted route/trip (busPosition, which
+// itself falls back to the schedule when its fix is stale or missing).
+// Null when neither exists.
+function admBusResolved(bus){
+  const loc=OPS.locations[bus.id];
+  if(loc&&loc.lat!=null&&loc.lng!=null){
+    const age=(Date.now()-new Date(loc.updated_at).getTime())/1000;
+    if(age>=0&&age<=180) return {lat:loc.lat,lon:loc.lng,source:"gps",age:age,updated_at:loc.updated_at};
+  }
+  const al=admBusAllotment(bus);
+  if(!al) return null;
+  let pos=null;
+  if(al.kind===state.trip){ pos=busPosition(al.route); }
+  else{ const prev=state.trip; state.trip=al.kind; try{ pos=busPosition(al.route); }finally{ state.trip=prev; } }
+  if(!pos) return null;
+  return {lat:pos.lat,lon:pos.lon,source:"schedule",status:pos.status};
+}
+function admBusAgeText(age){
+  const s=Math.max(0,Math.floor(age));
+  if(s<60) return s+" s ago";
+  const m=Math.floor(s/60);
+  return m+" min ago";
+}
+// Status line for the selected bus: number, today's allotment (or the
+// plain not-allotted wording), and where the position came from.
+function admBusStatusLine(bus,res){
+  const parts=["Bus "+busNumText(bus.number)];
+  const al=admBusAllotment(bus);
+  parts.push(al?(al.route.id+" · "+TRIPS[al.kind]):"Not allotted today");
+  if(!res) parts.push("No position available for this bus");
+  else if(res.source==="gps") parts.push("Live GPS · updated "+admBusAgeText(res.age));
+  else parts.push("Schedule position — no live fix");
+  return parts.join(" · ");
+}
 function initAdminMap(){
   const el=$("admMap"); if(!el||typeof L==="undefined"||A.map) return;
   A.map=L.map("admMap",{zoomControl:false});
@@ -2869,7 +3108,11 @@ function drawAdminMap(){
   if(!cw||!ch){ A.wasHidden=true; return; }
   if(A.wasHidden||cw!==A.sizeW||ch!==A.sizeH){ A.sizeW=cw; A.sizeH=ch; A.wasHidden=false; A.map.invalidateSize(); }
   // Faint route lines for every route — rebuilt only when the trip changes.
+  // A trip change is also a new framing context for a picked bus: its
+  // resolved position belongs to the new trip, so the once-only frame
+  // is re-armed (the All-buses fit is re-armed the same way, via fitKey).
   if(A.linesKey!==String(state.trip)){
+    A.framedKey="";
     A.linesKey=String(state.trip); A.lineLayer.clearLayers();
     DATA.routes.forEach(r=>{
       L.polyline(routeLine(r),{color:"#0b0b0c",weight:2.5,opacity:.18}).addTo(A.lineLayer);
@@ -2881,6 +3124,46 @@ function drawAdminMap(){
       A.campus.addTo(A.map);
     }
   }
+  // One bus picked in the selector: only that bus's marker is drawn
+  // (route lines and the Campus marker above stay as they are), a
+  // status line names the bus, its allotment and where its position
+  // came from, and the camera frames on it ONCE — at selection time.
+  // Later ticks move the marker only, never the camera.
+  const statusEl=$("admBusStatus");
+  if(A.selBusId&&!admSelectedBus()){ A.selBusId=null; A.framedKey=""; A.fitKey=""; const bs=$("admBusSel"); if(bs) bs.value=""; }
+  const selBus=admSelectedBus();
+  if(selBus){
+    const res=admBusResolved(selBus);
+    const key="bus:"+selBus.id, seenSel={};
+    if(res){
+      seenSel[key]=true;
+      const al=admBusAllotment(selBus);
+      const ic=otherBusIcon(al?{busNo:"Bus "+busNumText(selBus.number),route:al.route,passed:false}:{busNo:null,route:{id:"Bus "+busNumText(selBus.number)},passed:false});
+      const popHtml="<b>Bus "+esc(busNumText(selBus.number))+"</b><br>"+esc(admBusStatusLine(selBus,res))+(res.status?"<br>"+esc(res.status):"");
+      const ex=A.markers[key];
+      if(!ex){
+        const m=L.marker([res.lat,res.lon],{icon:ic.icon}).addTo(A.map);
+        m.bindPopup(popHtml);
+        A.markers[key]={m:m,html:ic.html};
+      }else{
+        ex.m.setLatLng([res.lat,res.lon]);
+        if(ex.html!==ic.html){ ex.m.setIcon(ic.icon); ex.html=ic.html; }
+        if(ex.m.setPopupContent) ex.m.setPopupContent(popHtml);
+      }
+      const elm=A.markers[key].m.getElement(); if(elm) elm.title="Bus "+busNumText(selBus.number)+" — "+admBusStatusLine(selBus,res);
+    }
+    Object.keys(A.markers).forEach(k=>{ if(!seenSel[k]){ A.map.removeLayer(A.markers[k].m); delete A.markers[k]; } });
+    if(statusEl){ statusEl.hidden=false; statusEl.textContent=admBusStatusLine(selBus,res); }
+    const note1=$("admMapNote");
+    if(note1) note1.textContent="Showing Bus "+busNumText(selBus.number)+" only • "+TRIPS[state.trip]+" trip • positions as of "+fmt(nowMin())+".";
+    // Frame ONCE, and only once a position actually exists: a bus with
+    // no resolvable position must not consume the frame, or a position
+    // that arrives later (a fix landing, an allotment being saved)
+    // would never be framed on. Later ticks move the marker only.
+    if(A.framedKey!==key&&res){ A.framedKey=key; A.map.setView([res.lat,res.lon],14,{animate:false}); }
+    return;
+  }
+  if(statusEl){ statusEl.hidden=true; statusEl.textContent=""; }
   // One marker per route = the whole fleet, at exact live positions.
   const seen={}, pts=[[CAMPUS.lat,CAMPUS.lon]]; let live=0;
   DATA.routes.forEach(r=>{
@@ -2975,13 +3258,20 @@ function onDutyError(err){
 async function sendDutyPosition(pos){
   const c=pos.coords;
   const nowMs=Date.now();
-  const moved=DUTY.lastPos?havKm(DUTY.lastPos.lat,DUTY.lastPos.lon,c.latitude,c.longitude)*1000:Infinity;
-  if(nowMs-DUTY.lastSent<10000&&moved<25) return;
-  DUTY.lastSent=nowMs;
   const speedKmh=(c.speed==null?null:Math.round(c.speed*3.6*10)/10), heading=(c.heading==null?null:c.heading);
+  // The distance for the send throttle is measured against the
+  // PREVIOUS fix; the plotted position (DUTY.lastPos, which the
+  // driver map reads first) is updated from EVERY fix, even one the
+  // throttle holds back from the network. Previously a fix inside
+  // the 10s/25m window left lastPos untouched, so the driver map
+  // froze on slow or stop-start movement until a fix cleared the
+  // throttle — the driver-side half of the frozen marker.
+  const moved=DUTY.lastPos?havKm(DUTY.lastPos.lat,DUTY.lastPos.lon,c.latitude,c.longitude)*1000:Infinity;
   // Keep speed/heading with the last known position so the heartbeat
   // below can re-send the identical fix, not a stripped-down one.
   DUTY.lastPos={lat:c.latitude, lon:c.longitude, speed_kmh:speedKmh, heading:heading};
+  if(nowMs-DUTY.lastSent<10000&&moved<25) return;
+  DUTY.lastSent=nowMs;
   try{
     await upsertLocation(DUTY.busId, c.latitude, c.longitude, speedKmh, heading);
     DUTY.lastSentAt=new Date().toISOString();
@@ -3056,7 +3346,7 @@ function renderFleetManager(){
   if(!OPS.buses.length){ host.innerHTML='<p class="sub">No buses yet. Add the first bus number below.</p>'; return; }
   host.innerHTML=OPS.buses.map(function(b){
     const at=allotmentTripForBus(b.id);
-    return '<div class="rowitem"><span><b>Bus '+esc(busNumText(b.number))+'</b> <span class="sub">'+(at?(at.route.id+" · "+TRIPS[at.kind]+" today"):"Not allotted today")+'</span></span><span style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end"><span class="badge '+(b.active?"b-green":"b-grey")+'">'+(b.active?"Active":"Inactive")+'</span><button class="btn-ghost" type="button" data-bus-act="'+b.id+'">'+(b.active?"Deactivate":"Activate")+'</button><button class="btn-ghost" type="button" data-bus-del="'+b.id+'">Remove</button></span></div>';
+    return '<div class="rowitem'+(A.selBusId===b.id?" fleet-sel":"")+'"><span><b>Bus '+esc(busNumText(b.number))+'</b> <span class="sub">'+(at?(at.route.id+" · "+TRIPS[at.kind]+" today"):"Not allotted today")+'</span></span><span style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end"><span class="badge '+(b.active?"b-green":"b-grey")+'">'+(b.active?"Active":"Inactive")+'</span><button class="btn-ghost" type="button" data-bus-act="'+b.id+'">'+(b.active?"Deactivate":"Activate")+'</button><button class="btn-ghost" type="button" data-bus-del="'+b.id+'">Remove</button></span></div>';
   }).join("");
   host.querySelectorAll("[data-bus-act]").forEach(function(btn){ btn.addEventListener("click", async function(){ btn.disabled=true; try{ const b=OPS.buses.filter(function(x){ return x.id===btn.dataset.busAct; })[0]; await setBusActive(b.id, !b.active); }catch(e){ if(note) note.textContent="Couldn't change the bus: "+sbFriendly(e); } finally{ btn.disabled=false; renderAll(); } }); });
   host.querySelectorAll("[data-bus-del]").forEach(function(btn){ btn.addEventListener("click", async function(){
@@ -3091,15 +3381,29 @@ function renderAllotmentEditor(){
   const db=$("drvDutyBtn"); if(db) db.addEventListener("click", function(){ if(DUTY.on) endDuty(false); else startDuty(); });
   const ab=$("admBusAdd"); if(ab) ab.addEventListener("click", addBusFromForm);
 })();
+// Fleet-map bus selector options: "All buses" first, then one entry
+// per bus in the fleet, from the same OPS.buses the admin view already
+// loads. Rebuilt on every admin render, so a bus added or removed while
+// the page is open appears/disappears; if the picked bus disappears,
+// the selection falls back to All buses on its own.
+function renderAdmBusSelector(){
+  const sel=$("admBusSel"); if(!sel) return;
+  if(A.selBusId&&!OPS.buses.some(function(b){ return b.id===A.selBusId; })){ A.selBusId=null; A.framedKey=""; A.fitKey=""; }
+  const buses=OPS.buses.slice().sort(function(a,b){ return String(a.number).localeCompare(String(b.number), undefined, {numeric:true}); });
+  sel.innerHTML='<option value="">All buses</option>'+buses.map(function(b){ return '<option value="'+b.id+'"'+(A.selBusId===b.id?" selected":"")+'>Bus '+esc(busNumText(b.number))+'</option>'; }).join("");
+  sel.value=A.selBusId||"";
+}
 function renderAdmin(){
   $("admTripName").textContent=TRIPS[state.trip]+" trip";
   const mt=$("admMapTrip"); if(mt) mt.textContent=TRIPS[state.trip]+" trip";
   document.querySelectorAll("#admTripBtns .atrip").forEach(b=>b.classList.toggle("active",+b.dataset.atrip===state.trip));
+  renderAdmBusSelector();
   drawAdminMap();
   $("admFleet").innerHTML=DATA.routes.map(r=>{
     const[label,cls,p,c]=routeStatus(r);
     const bl=busLabelFor(r,state.trip);
-    return `<div class="rowitem"><span><b>${r.id}</b> <span class="sub">• ${bl?bl+" today":"Not allotted today"} • 1st stop ${r.stops[0].n}</span></span><span style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end"><span class="badge b-grey">${p} stops passed</span><span class="badge b-grey">${c} to go</span><span class="badge ${cls}">${label}</span>${delayOf(r.id)?'<span class="badge b-red">+'+delayOf(r.id)+' min</span>':""}</span></div>`;
+    const ra=allotFor(r,state.trip);
+    return `<div class="rowitem${A.selBusId&&ra&&ra.bus&&ra.bus.id===A.selBusId?" fleet-sel":""}"><span><b>${r.id}</b> <span class="sub">• ${bl?bl+" today":"Not allotted today"} • 1st stop ${r.stops[0].n}</span></span><span style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end"><span class="badge b-grey">${p} stops passed</span><span class="badge b-grey">${c} to go</span><span class="badge ${cls}">${label}</span>${delayOf(r.id)?'<span class="badge b-red">+'+delayOf(r.id)+' min</span>':""}</span></div>`;
   }).join("");
   renderFleetManager();
   renderAllotmentEditor();
@@ -3239,6 +3543,10 @@ $("locateBtn").addEventListener("click",()=>{ S.fitKey=""; if(curDrawn) drawMap(
   });
 })();
 $("admDelayRoute").addEventListener("change",e=>{state.admDelayRoute=e.target.value; renderAll();});
+// Fleet-map bus selector: a pick reframes once (drawAdminMap reads the
+// cleared framedKey); going back to All buses restores the whole-fleet
+// fit by clearing fitKey, exactly the fit the map already does per trip.
+$("admBusSel").addEventListener("change",e=>{ A.selBusId=e.target.value||null; A.framedKey=""; if(!A.selBusId) A.fitKey=""; renderAll(); });
 $("drvZoomIn").addEventListener("click",()=>zoomDriver(1));
 $("drvZoomOut").addEventListener("click",()=>zoomDriver(-1));
 $("drvLocateBtn").addEventListener("click",()=>recenterDriverMap());
@@ -3280,7 +3588,7 @@ $("mapStops").addEventListener("click",e=>{
 });
 window.addEventListener("resize",()=>{ S.sizeW=0; D.sizeW=0; A.sizeW=0; if(state.role==="student"&&curDrawn) drawMap(curDrawn.route); if(state.role==="driver"&&drvLast) drawDriverMap(drvLast.route,drvLast.nextName); if(state.role==="admin") drawAdminMap(); });
 // Small read handle for automated checks of the live map state.
-window.__aju={studentMap:()=>S.map,driverMap:()=>D.map,adminMap:()=>A.map,adminBusMarkers:()=>A.markers,selBusMarker:()=>S.selBus,otherBusMarkers:()=>S.others,pinMarkers:()=>S.pinMarkers,base:()=>S.base,adminBase:()=>A.base,busPosition:busPosition,driverBusPosition:driverBusPosition,recenterDriverMap:recenterDriverMap,duty:()=>DUTY,nowMin:nowMin,state:state,DATA:DATA,refresh:()=>{ if(curDrawn) drawMap(curDrawn.route); }};
+window.__aju={studentMap:()=>S.map,driverMap:()=>D.map,adminMap:()=>A.map,adminBusMarkers:()=>A.markers,selBusMarker:()=>S.selBus,otherBusMarkers:()=>S.others,pinMarkers:()=>S.pinMarkers,base:()=>S.base,adminBase:()=>A.base,busPosition:busPosition,driverBusPosition:driverBusPosition,recenterDriverMap:recenterDriverMap,duty:()=>DUTY,nowMin:nowMin,state:state,DATA:DATA,ops:()=>OPS,adminA:()=>A,admBusResolved:admBusResolved,admBusStatusLine:admBusStatusLine,renderAll:()=>renderAll(),refresh:()=>{ if(curDrawn) drawMap(curDrawn.route); }};
 // ---- Site-styled dropdowns ---------------------------------------------
 // The popup list of a native <select> is drawn by the OS — black list,
 // blue highlight, grey scrollbar — and no CSS can theme it. So each
@@ -3869,12 +4177,12 @@ function enhanceSelect(sel){
   renderAuthHeader();
 })();
 
-["stopSel","routeSel","admDelayRoute"].forEach(function(id){ enhanceSelect($(id)); });
+["stopSel","routeSel","admDelayRoute","admBusSel"].forEach(function(id){ enhanceSelect($(id)); });
 state.trip=initialTripFor(nowMin()); syncTripButtons();
 renderAll(); tick();
 loadChartFromDB(); loadOps();
 setInterval(()=>{tick(); renderAll();},5000);
-setInterval(loadOps,20000);
+setInterval(loadOps,15000);
 document.addEventListener("visibilitychange", function(){ if(!document.hidden) loadOps(); });
 </script>
 </body>
