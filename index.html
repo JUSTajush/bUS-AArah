@@ -2978,6 +2978,53 @@ function routeStatus(route){
   if(passedN>=times.length) return ["Completed","b-grey",passedN,0];
   return ["En route","b-green",passedN,times.length-passedN];
 }
+// Fleet-overview row status: the same location-first rule as the
+// Student view, applied to the Admin fleet list. When the route's
+// allotted bus for the selected trip has a fresh GPS fix, the row's
+// passed / to-go counts and label follow the fix's along-route
+// progress (via liveProgressFor — gpsFor's <=180 s freshness rule,
+// routeLine geometry, cumDistKm and projectAlongPath; no second
+// projection engine). "Completed" is then true only by GPS, when the
+// bus has genuinely reached the end of the route line. In every
+// other case — no allotment, no fix, a stale fix, or an unusable
+// projection — this returns routeStatus() bit-for-bit, so the row
+// reads exactly as it did before. routeStatus itself is untouched.
+function fleetRowStatus(route){
+  const prog=liveProgressFor(route);
+  if(!prog||!prog.linePts||prog.linePts.length<2||!prog.cum||!prog.cum.length) return routeStatus(route);
+  if(!isFinite(prog.along)||!isFinite(prog.totalKm)) return routeStatus(route);
+  // Counted stops: exactly the set routeStatus counts — stops whose
+  // liveTime for the selected trip is non-null.
+  const counted=routeStops(route).filter(function(s){ return liveTime(route,s)!==null; });
+  if(!counted.length) return routeStatus(route);
+  // Along-route position of each counted stop: vertexAlongKm for
+  // stops with coordinates (preferLast for Gamaharia Campus, as
+  // scheduleAlongKm does); stops without a pinned position take an
+  // along position interpolated between the nearest pinned counted
+  // neighbours by their order among the counted stops, mirroring
+  // driverProgressFor (nearest one's along when neighbours exist on
+  // one side only).
+  const direct=counted.map(function(s){
+    if(s.lat==null||s.lon==null) return null;
+    return vertexAlongKm(prog.linePts,prog.cum,s.lat,s.lon,canon(s.n)===canon("Gamaharia Campus"));
+  });
+  let anchors=0; direct.forEach(function(a){ if(a!==null) anchors++; });
+  if(!anchors) return routeStatus(route);
+  const alongs=direct.slice();
+  for(let i=0;i<alongs.length;i++){
+    if(alongs[i]!==null) continue;
+    let prev=-1, next=-1;
+    for(let j=i-1;j>=0;j--){ if(direct[j]!==null){ prev=j; break; } }
+    for(let k=i+1;k<alongs.length;k++){ if(direct[k]!==null){ next=k; break; } }
+    if(prev>=0&&next>=0) alongs[i]=direct[prev]+(i-prev)/(next-prev)*(direct[next]-direct[prev]);
+    else if(prev>=0) alongs[i]=direct[prev];
+    else if(next>=0) alongs[i]=direct[next];
+  }
+  if(alongs.some(function(a){ return a===null||!isFinite(a); })) return routeStatus(route);
+  if(prog.along>=prog.totalKm-0.15) return ["Completed","b-grey",counted.length,0];
+  const passedN=alongs.filter(function(a){ return a<=prog.along+0.15; }).length;
+  return ["En route · live GPS","b-green",passedN,counted.length-passedN];
+}
 // On-time status, computed automatically from the bus's live
 // position vs the chart — no driver input. The bus's position sits on the
 // segment between two stops (by live times); taking the same fraction along
@@ -3669,7 +3716,7 @@ function renderAdmin(){
   renderAdmBusSelector();
   drawAdminMap();
   $("admFleet").innerHTML=DATA.routes.map(r=>{
-    const[label,cls,p,c]=routeStatus(r);
+    const[label,cls,p,c]=fleetRowStatus(r);
     const bl=busLabelFor(r,state.trip);
     const ra=allotFor(r,state.trip);
     return `<div class="rowitem${A.selBusId&&ra&&ra.bus&&ra.bus.id===A.selBusId?" fleet-sel":""}"><span><b>${r.id}</b> <span class="sub">• ${bl?bl+" today":"Not allotted today"} • 1st stop ${r.stops[0].n}</span></span><span style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end"><span class="badge b-grey">${p} stops passed</span><span class="badge b-grey">${c} to go</span><span class="badge ${cls}">${label}</span>${delayOf(r.id)?'<span class="badge b-red">+'+delayOf(r.id)+' min</span>':""}</span></div>`;
