@@ -7,19 +7,28 @@
 <script>
 /* Paint-time gate lock — runs synchronously in <head>, before the first
    frame can paint. It mirrors the session check in the auth block at the
-   bottom of this file (a stored Supabase session in basaarah_sb_session
-   whose access token has not expired) and stamps <html> with pre-gate or
-   pre-app. The CSS then keeps the app chrome display:none from frame one
-   when logged out, instead of the end-of-body script having to catch up
-   and hide an already-painted app — that catch-up window was the
-   split-second flash of the tracker behind the login gate. Any storage
-   error fails safe to the gate, exactly like the auth block. Old demo
-   keys are removed here: real accounts supersede them. */
+   bottom of this file (a stored Supabase session in basaarah_sb_session)
+   and stamps <html> with pre-gate or pre-app. The CSS then keeps the app
+   chrome display:none from frame one when logged out, instead of the
+   end-of-body script having to catch up and hide an already-painted app
+   — that catch-up window was the split-second flash of the tracker
+   behind the login gate. When a session exists at all (a live access
+   token, or a refresh token the auth block can still redeem), <html>
+   also gets pre-role: no role view may paint until the auth block has
+   fetched the account's profile and chosen that role's view, so a
+   reload never paints the student view — the markup's default active
+   view — for a second before switching to the admin/driver view. The
+   boot veil covers that wait; showGate()/hideGate() remove pre-role
+   once the role is decided, and a watchdog in the auth block clears it
+   if the profile fetch hangs. Any storage error fails safe to the gate,
+   exactly like the auth block. Old demo keys are removed here: real
+   accounts supersede them. */
 (function(){try{
   try{ localStorage.removeItem("basaarah_users"); localStorage.removeItem("basaarah_session"); }catch(e){}
-  var raw=localStorage.getItem("basaarah_sb_session"), ok=false;
-  if(raw){ try{ var s=JSON.parse(raw); if(s&&s.access_token&&s.expires_at&&s.expires_at>Date.now()+30000) ok=true; }catch(e){} }
+  var raw=localStorage.getItem("basaarah_sb_session"), ok=false, hasSession=false;
+  if(raw){ try{ var s=JSON.parse(raw); if(s&&s.access_token){ hasSession=true; if(s.expires_at&&s.expires_at>Date.now()+30000) ok=true; } if(s&&s.refresh_token) hasSession=true; }catch(e){} }
   document.documentElement.classList.add(ok?"pre-app":"pre-gate");
+  if(hasSession) document.documentElement.classList.add("pre-role");
 }catch(e){ document.documentElement.classList.add("pre-gate"); }})();
 </script>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2064%2064%27%3E%3Crect%20width%3D%2764%27%20height%3D%2764%27%20rx%3D%2714%27%20fill%3D%27%23111113%27%2F%3E%3Cg%20transform%3D%27translate%285%2017%29%20scale%280.96%29%27%3E%3Cpath%20d%3D%22M10%204h32c4.2%200%207.9%202.6%209.4%206.4l1.3%203.4c.4%201%20.6%202.1.6%203.2v4.5c0%201.4-1.1%202.5-2.5%202.5H5.5C4.1%2024%203%2022.9%203%2021.5V9C3%206.2%205.2%204%2010%204Z%22%20fill%3D%22%23f5a623%22%2F%3E%3Crect%20x%3D%227%22%20y%3D%227.5%22%20width%3D%228%22%20height%3D%227%22%20rx%3D%221.8%22%20fill%3D%22%23161617%22%2F%3E%3Crect%20x%3D%2217%22%20y%3D%227.5%22%20width%3D%228%22%20height%3D%227%22%20rx%3D%221.8%22%20fill%3D%22%23161617%22%2F%3E%3Crect%20x%3D%2227%22%20y%3D%227.5%22%20width%3D%228%22%20height%3D%227%22%20rx%3D%221.8%22%20fill%3D%22%23161617%22%2F%3E%3Cpath%20d%3D%22M38%207.5h3c2%200%203.9%201.2%204.7%203.1l1.2%203.9H38Z%22%20fill%3D%22%23161617%22%2F%3E%3Ccircle%20cx%3D%2250.6%22%20cy%3D%2219.8%22%20r%3D%221.6%22%20fill%3D%22%23161617%22%2F%3E%3Ccircle%20cx%3D%2214%22%20cy%3D%2224%22%20r%3D%225%22%20fill%3D%22%23111113%22%2F%3E%3Ccircle%20cx%3D%2242%22%20cy%3D%2224%22%20r%3D%225%22%20fill%3D%22%23111113%22%2F%3E%3Ccircle%20cx%3D%2214%22%20cy%3D%2224%22%20r%3D%223.5%22%20fill%3D%22%23141414%22%2F%3E%3Ccircle%20cx%3D%2242%22%20cy%3D%2224%22%20r%3D%223.5%22%20fill%3D%22%23141414%22%2F%3E%3Ccircle%20cx%3D%2214%22%20cy%3D%2224%22%20r%3D%221.3%22%20fill%3D%22%23f5a623%22%2F%3E%3Ccircle%20cx%3D%2242%22%20cy%3D%2224%22%20r%3D%221.3%22%20fill%3D%22%23f5a623%22%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E">
@@ -719,6 +728,18 @@ body.auth-open .topbar,body.auth-open .wrap{display:none!important}
 html.pre-gate .topbar,html.pre-gate .wrap{display:none!important}
 html.pre-gate #authView{display:block}
 html.pre-app #authView{display:none!important}
+/* Role-blind boot: while a saved session exists but the account's role
+   is not yet known, neither the gate nor any role view may paint — the
+   student view is the markup's default active view, and painting it
+   before the profile fetch returns is the reload flash. The boot veil
+   is the only thing on screen until showGate()/hideGate() decide. */
+html.pre-role .topbar,html.pre-role .wrap,html.pre-role #authView{display:none!important}
+#bootVeil{display:none}
+html.pre-role #bootVeil{display:flex;position:fixed;inset:0;z-index:4000;background:var(--bg);color:var(--ink);align-items:center;justify-content:center;flex-direction:column;gap:16px}
+.boot-word{font-family:"Baloo 2","Archivo",sans-serif;font-weight:800;font-size:34px;line-height:1;letter-spacing:.2px}
+.boot-spin{width:26px;height:26px;border-radius:50%;border:3px solid var(--line);border-top-color:#f5a623;animation:boot-spin .8s linear infinite}
+@keyframes boot-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.boot-spin{animation:none;border-top-color:var(--line)}}
 #authView{min-height:100dvh;background:#e7e7ea}
 #gateMain[hidden],#gateAdmin[hidden]{display:none!important}
 /* ---------- auth gate: app-style (bright white column on soft grey) ---------- */
@@ -1205,6 +1226,11 @@ select.admsel{padding:10px 14px;border-radius:999px;border:1px solid var(--line)
 </style>
 </head>
 <body>
+<!-- BOOT VEIL: shown only while a saved session exists and the account's
+     role is not yet known (html.pre-role, set in <head>). It hides the
+     default student view so a reload never flashes it before the
+     admin/driver view is chosen. -->
+<div id="bootVeil" role="status" aria-label="Loading your view"><div class="boot-word">बसaarah</div><div class="boot-spin" aria-hidden="true"></div></div>
 <header class="topbar">
   <div class="brand"><div class="logo" role="img" aria-label="बसaarah logo"><svg width="40" height="23" viewBox="0 0 56 32" aria-hidden="true"><path d="M10 4h32c4.2 0 7.9 2.6 9.4 6.4l1.3 3.4c.4 1 .6 2.1.6 3.2v4.5c0 1.4-1.1 2.5-2.5 2.5H5.5C4.1 24 3 22.9 3 21.5V9C3 6.2 5.2 4 10 4Z" fill="#f5a623"/><rect x="7" y="7.5" width="8" height="7" rx="1.8" fill="#161617"/><rect x="17" y="7.5" width="8" height="7" rx="1.8" fill="#161617"/><rect x="27" y="7.5" width="8" height="7" rx="1.8" fill="#161617"/><path d="M38 7.5h3c2 0 3.9 1.2 4.7 3.1l1.2 3.9H38Z" fill="#161617"/><circle cx="50.6" cy="19.8" r="1.6" fill="#161617"/><circle cx="14" cy="24" r="5" fill="var(--surface)"/><circle cx="42" cy="24" r="5" fill="var(--surface)"/><circle cx="14" cy="24" r="3.5" fill="#141414"/><circle cx="42" cy="24" r="3.5" fill="#141414"/><circle cx="14" cy="24" r="1.3" fill="#f5a623"/><circle cx="42" cy="24" r="1.3" fill="#f5a623"/></svg></div><div><b>बसaarah</b><span>ARKA JAIN University • Gamharia Campus</span></div></div>
   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
@@ -4167,12 +4193,14 @@ function enhanceSelect(sel){
   }
   function showGate(){
     authView.hidden=false; document.body.classList.add("auth-open");
+    document.documentElement.classList.remove("pre-role");
     document.documentElement.classList.add("pre-gate"); document.documentElement.classList.remove("pre-app");
     gateMain.hidden=false; gateAdmin.hidden=true;
     window.scrollTo(0,0);
   }
   function hideGate(){
     authView.hidden=true; document.body.classList.remove("auth-open");
+    document.documentElement.classList.remove("pre-role");
     document.documentElement.classList.add("pre-app"); document.documentElement.classList.remove("pre-gate");
   }
 
@@ -4512,6 +4540,24 @@ function enhanceSelect(sel){
     }
     renderAuthHeader();
   }
+  // Boot watchdog: the veil must never stick. If the profile fetch is
+  // still unresolved after 8s, decide from the profile already stored
+  // with the session (saved by every login/signup — no new storage),
+  // or fall back to the gate. If restoreSession() later completes, it
+  // re-enters with the fresh profile and corrects the view.
+  setTimeout(function(){
+    if(!document.documentElement.classList.contains("pre-role")) return;
+    try{
+      if(sbSession&&sbSession.profile){
+        currentUser=profileToUser(sbSession.profile, sbSession.user?sbSession.user.email:"", sbSession.user?sbSession.user.id:"");
+        if(userRole(currentUser)==="student") applyHomeStop(currentUser);
+        setRoleView(userRole(currentUser)); hideGate();
+      }else{
+        showGate();
+      }
+    }catch(e){ showGate(); }
+    renderAuthHeader();
+  },8000);
   restoreSession();
   renderAuthHeader();
 })();
