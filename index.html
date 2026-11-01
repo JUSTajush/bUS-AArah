@@ -821,9 +821,13 @@ h1.title em{font-style:normal;background:#000;color:#fff;padding:0 10px;border-r
 /* Admin oversees the whole fleet and has no personal stop: the shared
    stop / route / location bar and the student headline above it are
    hidden for the admin role only (placeControls toggles .is-admin).
-   Student and Driver keep them exactly as they are. */
+   The Driver keeps only the Route and Trip groups: the student-only
+   stop selector and My-location groups are hidden for the driver role
+   (placeControls toggles .is-driver), since the driver's own position
+   is broadcast by Start duty, not by the student location flow. */
 body.is-admin .title,body.is-admin .lede,body.is-admin #controlsHome{display:none}
 body.is-admin #view-admin{margin-top:2px}
+body.is-driver #controlsBar .cb-stop,body.is-driver #controlsBar .cb-geo{display:none}
 #controlsBar{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:flex-end;background:var(--surface);border:1px solid var(--line);border-radius:24px;padding:10px 14px}
 #stageControls #controlsBar{border:0;box-shadow:0 10px 30px rgba(0,0,0,.24)}
 .cb-group{display:flex;flex-direction:column;gap:5px;min-width:0}
@@ -1067,7 +1071,7 @@ select.admsel{padding:10px 14px;border-radius:999px;border:1px solid var(--line)
 .grid{display:grid;grid-template-columns:1.5fr .95fr;gap:16px;margin-top:16px;align-items:start}
 .belowgrid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}
 /* ---------- driver ---------- */
-#drvMap{width:100%;height:440px;display:block;border-radius:14px;border:1px solid var(--line);background:#e9e7df;z-index:0}
+#drvMap{width:100%;height:440px;display:block;touch-action:none;border-radius:14px;border:1px solid var(--line);background:#e9e7df;z-index:0}
 .drvmapwrap{position:relative;overflow:hidden;border-radius:14px}
 #drvLocateBtn{position:absolute;right:14px;bottom:30px;z-index:30;width:48px;height:48px;border-radius:50%;border:0;background:#000;display:grid;place-items:center;cursor:pointer;box-shadow:0 6px 16px rgba(0,0,0,.35)}
 #drvLocateBtn svg{fill:#fff;display:block}
@@ -1358,7 +1362,7 @@ select.admsel{padding:10px 14px;border-radius:999px;border:1px solid var(--line)
       <button class="trip" data-trip="1">Morning 2nd Trip</button>
       <button class="trip" data-trip="2">Afternoon</button>
     </div></div>
-    <div class="cb-group"><label>My location</label><button id="geoBtn" type="button" class="btn-ghost">Use my location</button><span class="geonote" id="geoNote" role="status"></span></div>
+    <div class="cb-group cb-geo"><label>My location</label><button id="geoBtn" type="button" class="btn-ghost">Use my location</button><span class="geonote" id="geoNote" role="status"></span></div>
   </div></div>
 
   <!-- STUDENT -->
@@ -1829,6 +1833,30 @@ function routeStops(route){
 function chartTime(stop){ if(stop.request) return stop.est; if(stop.campusEst) return stop.est; return toMin(stop.t[state.trip]); }
 function delayOf(routeId){ const v=OPS.delays[dbRouteId(routeId)]; return typeof v==="number"?v:0; }
 function liveTime(route,stop){const ct=chartTime(stop); if(ct===null)return null; return ct+delayOf(route.id)}
+// Fresh-GPS override grace window (student predictions only): a fresh
+// GPS fix may override the schedule only until the trip's chart
+// campus-arrival time + that trip's admin delay + PRED_GRACE_MIN
+// minutes. Past that, the trip is complete on every student surface
+// regardless of how fresh the duty phone's GPS still is. With no fresh
+// GPS the schedule alone decides exactly as before, so the window
+// never delays or alters schedule-only completion. `trip` is the
+// route serving the currently selected trip kind (state.trip).
+const PRED_GRACE_MIN = 60;
+function gpsOverrideOpen(trip, now){
+  const t=(now===undefined||now===null)?nowMin():now;
+  const route=trip&&trip.route?trip.route:trip;
+  if(!route||!route.stops) return true;
+  const stops=routeStops(route);
+  const campusStops=stops.filter(function(s){ return canon(s.n)===canon("Gamaharia Campus"); });
+  const campus=campusStops.length?campusStops[campusStops.length-1]:null;
+  let end=campus?liveTime(route,campus):null;
+  if(end===null){
+    const times=stops.map(function(s){ return liveTime(route,s); }).filter(function(x){ return x!==null; });
+    end=times.length?Math.max.apply(null,times):null;
+  }
+  if(end===null) return true;
+  return t<=end+PRED_GRACE_MIN;
+}
 function allStopsUnique(){
   const seen=new Map();
   DATA.routes.forEach(r=>routeStops(r).forEach(s=>{const k=canon(s.n); if(!seen.has(k)) seen.set(k,s.n)}));
@@ -2153,16 +2181,26 @@ function scheduleAlongKm(route,stops,linePts,cum,now){
   return cum[cum.length-1];
 }
 // Fresh-GPS progress for a route, or null when there is no fresh fix /
-// no usable geometry. stopAlong is the selected stop's along-route
+// no usable geometry, or when the GPS-override grace window has closed
+// (gpsOverrideOpen): past chart end + delay + 60 min a fresh fix must
+// not revive a completed trip as "coming" on any student surface.
+// stopAlong is the selected stop's along-route
 // distance (null when the stop has no confirmed coordinates on this
 // route, in which case callers fall back to the schedule verdict).
 function liveProgressFor(route,stopName){
+  const now=nowMin();
+  // Single decision point for the cap: returning null here makes
+  // busesAtStop, the missed-bus intercept and the student line all
+  // fall back to the schedule verdict consistently. busPosition() is
+  // untouched, so the drawn marker may still follow fresh GPS, and
+  // Admin/Driver views never call this path.
+  if(!gpsOverrideOpen(route,now)) return null;
   const gps=gpsFor(route); if(!gps) return null;
   const stops=routeStops(route);
   const linePts=routeLine(route);
   if(linePts.length<2) return null;
   const cum=cumDistKm(linePts);
-  const schedAlong=scheduleAlongKm(route,stops,linePts,cum,nowMin());
+  const schedAlong=scheduleAlongKm(route,stops,linePts,cum,now);
   const proj=projectAlongPath(linePts,cum,gps.lat,gps.lon,schedAlong,gps.heading);
   if(!proj) return null;
   const sel=stops.find(function(s){ return canon(s.n)===canon(stopName||state.stopName); });
@@ -3025,6 +3063,72 @@ function driverBusPosition(route){
   }
   return busPosition(route);
 }
+// Driver stop progression from the driver's OWN GPS while on duty.
+// The clock alone cannot say a stop is reached: at 18:31 the afternoon
+// chart is long past, yet the driver may still be ~600 m short of Lal
+// Building. While on duty, the fresh own position (the same sources
+// driverBusPosition uses — the device fix first, else a fresh <=180 s
+// bus_locations row for the duty bus) is projected onto this route's
+// baked geometry exactly as liveProgressFor does it (routeLine,
+// cumDistKm, scheduleAlongKm as the preferAlong prior, projectAlongPath
+// with the fix's heading), and each stop's along-route position decides
+// reached/next. The student gpsOverrideOpen / PRED_GRACE_MIN cap is
+// deliberately NOT applied here: the driver's own progression is not a
+// student prediction. Stops without confirmed coordinates take an
+// along position interpolated between the nearest coordinate-bearing
+// neighbours in stop order (the nearest one's along when neighbours
+// exist on one side only). Null when off duty, when there is no fresh
+// own fix, or when projection/geometry is unusable — callers then keep
+// the clock rule bit-for-bit.
+function driverProgressFor(route){
+  if(!(DUTY.on&&DUTY.busId)) return null;
+  const own=driverBusPosition(route);
+  if(!own||(own.src!=="device"&&own.src!=="db")) return null;
+  let heading=null;
+  if(own.src==="device"&&DUTY.lastPos&&DUTY.lastPos.heading!==undefined&&DUTY.lastPos.heading!==null) heading=DUTY.lastPos.heading;
+  else if(own.src==="db"){ const loc=OPS.locations[DUTY.busId]; if(loc&&loc.heading!==undefined&&loc.heading!==null) heading=loc.heading; }
+  if(heading!==null&&!isFinite(heading)) heading=null;
+  const stops=routeStops(route);
+  const linePts=routeLine(route);
+  if(linePts.length<2) return null;
+  const cum=cumDistKm(linePts);
+  if(!cum.length) return null;
+  const now=nowMin();
+  const schedAlong=scheduleAlongKm(route,stops,linePts,cum,now);
+  const proj=projectAlongPath(linePts,cum,own.lat,own.lon,schedAlong,heading);
+  if(!proj) return null;
+  // Direct along-route positions from the geometry vertices; a
+  // coordinate-bearing stop that is not a vertex within 2 m falls back
+  // to its nearest-point projection onto the same geometry.
+  const alongs=stops.map(function(s){
+    if(s.lat===null||s.lon===null) return null;
+    const a=vertexAlongKm(linePts,cum,s.lat,s.lon,canon(s.n)===canon("Gamaharia Campus"));
+    if(a!==null) return a;
+    const p=projectAlongPath(linePts,cum,s.lat,s.lon,null,null);
+    return p?p.along:null;
+  });
+  const direct=alongs.slice();
+  let anchors=0; direct.forEach(function(a){ if(a!==null) anchors++; });
+  if(!anchors) return null;
+  for(let i=0;i<alongs.length;i++){
+    if(alongs[i]!==null) continue;
+    let prev=-1, next=-1;
+    for(let j=i-1;j>=0;j--){ if(direct[j]!==null){ prev=j; break; } }
+    for(let k=i+1;k<alongs.length;k++){ if(direct[k]!==null){ next=k; break; } }
+    if(prev>=0&&next>=0) alongs[i]=direct[prev]+(i-prev)/(next-prev)*(direct[next]-direct[prev]);
+    else if(prev>=0) alongs[i]=direct[prev];
+    else if(next>=0) alongs[i]=direct[next];
+  }
+  const reached=alongs.map(function(a,i){
+    if(a!==null) return a<=proj.along+0.15;
+    const lt=liveTime(route,stops[i]);
+    return lt!==null&&lt<=now;
+  });
+  let nextIndex=-1;
+  for(let i=0;i<reached.length;i++){ if(!reached[i]){ nextIndex=i; break; } }
+  const doneN=reached.filter(Boolean).length;
+  return {fix:{lat:own.lat,lon:own.lon,heading:heading,src:own.src}, along:proj.along, offKm:proj.offKm, totalKm:cum[cum.length-1], schedAlong:schedAlong, stops:stops, alongs:alongs, reached:reached, doneN:doneN, nextIndex:nextIndex, nextStop:nextIndex>=0?stops[nextIndex]:null, finished:nextIndex<0};
+}
 // Re-centre (target) control for the driver map, matching the student
 // map's locate button: one tap centres on the bus's current resolved
 // position (driverBusPosition) at street-level zoom, capped at 15.
@@ -3039,6 +3143,10 @@ function drawDriverMap(route,nextName){
   drvLast={route:route,nextName:nextName};
   const el=$("drvMap"); if(!el) return;
   initDriverMap(); if(!D.map) return;
+  // Interaction handlers are re-enabled on every draw: a stale disabled
+  // state (e.g. left over from a 0-size initialisation) must never
+  // persist and leave finger pan/pinch dead.
+  ["dragging","touchZoom","scrollWheelZoom","doubleClickZoom","boxZoom","keyboard"].forEach(function(h){ if(D.map[h]&&D.map[h].enable) D.map[h].enable(); });
   const stops=routeStops(route);
   const pinned=stops.filter(s=>s.lat!==null&&s.lon!==null);
   const linePts=routeLine(route);
@@ -3061,14 +3169,23 @@ function drawDriverMap(route,nextName){
   D.halo.setLatLngs(linePts);
   D.done.setLatLngs(sp.done||[]);
   D.todo.setLatLngs(sp.todo);
-  const passedN=pinned.filter(s=>{const lt=liveTime(route,s); return lt!==null&&lt<=now;}).length;
-  const sKey=route.id+"|"+state.trip+"|"+(nextName||"")+"|"+passedN;
+  // Stop colouring follows the same GPS progression as the stop list
+  // when the driver is on duty with a fresh own fix; otherwise the
+  // clock rule below is used exactly as before. The effective next
+  // stop is the progression's next stop when active, so poll/on-duty
+  // draws that arrive without renderDriver stay correct too.
+  const prog=driverProgressFor(route);
+  const effNextName=prog?(prog.nextStop?prog.nextStop.n:null):nextName;
+  const reachedNames=prog?new Set(prog.stops.filter(function(s,i){ return prog.reached[i]; }).map(function(s){ return canon(s.n); })):null;
+  const isPassed=function(s){ if(reachedNames) return reachedNames.has(canon(s.n)); const lt=liveTime(route,s); return lt!==null&&lt<=now; };
+  const passedN=pinned.filter(isPassed).length;
+  const sKey=route.id+"|"+state.trip+"|"+(effNextName||"")+"|"+passedN;
   if(D.stopsKey!==sKey){
     D.stopsKey=sKey; D.stopLayer.clearLayers();
     pinned.forEach(s=>{
       if(s.n==="Gamaharia Campus") return;
-      const isNext=nextName&&canon(s.n)===canon(nextName);
-      const lt=liveTime(route,s), passed=lt!==null&&lt<=now;
+      const isNext=effNextName&&canon(s.n)===canon(effNextName);
+      const passed=isPassed(s);
       L.circleMarker([s.lat,s.lon],{radius:isNext?10:6,color:isNext?"#ffffff":"#0b0b0c",weight:2.5,fillColor:isNext?"#0b0b0c":(passed?"#a7abb0":"#ffffff"),fillOpacity:1}).addTo(D.stopLayer);
       if(isNext){
         const nm=L.marker([s.lat,s.lon],{icon:L.divIcon({className:"lf-div",html:"",iconSize:[1,1]}),interactive:false}).addTo(D.stopLayer);
@@ -3084,8 +3201,13 @@ function drawDriverMap(route,nextName){
     else { D.bus.setLatLng([pos.lat,pos.lon]); if(html!==D.busHtml){ D.bus.setIcon(selBusIcon(html)); D.busHtml=html; } }
   } else if(D.bus){ D.map.removeLayer(D.bus); D.bus=null; D.busHtml=""; }
   const fKey=route.id+"|"+state.trip;
+  // Leaflet size at fit time: if the container was hidden when the
+  // size was first cached (gate up), this reads 0x0 and the fit below
+  // is consumed at that size — it must not count (see repair below).
+  const sizeAtFit=(D.map.getSize?D.map.getSize():null);
+  let fitRan=false;
   if(D.fitKey!==fKey){
-    D.fitKey=fKey;
+    D.fitKey=fKey; fitRan=true;
     // Narrow screens: frame the bus, its next stop and Campus at street
     // level instead of the whole route extent (same rule as the student
     // map). Wide screens keep the full-route view. Ticks never re-fit,
@@ -3093,13 +3215,30 @@ function drawDriverMap(route,nextName){
     let framed=false;
     if(cw<=900&&pos){
       const focus=[[pos.lat,pos.lon],[CAMPUS.lat,CAMPUS.lon]];
-      const nx=stops.find(s=>nextName&&canon(s.n)===canon(nextName));
+      const nx=stops.find(s=>effNextName&&canon(s.n)===canon(effNextName));
       if(nx&&nx.lat!==null&&nx.lon!==null) focus.push([nx.lat,nx.lon]);
       const distinct=focus.filter((p,i)=>focus.findIndex(q=>q[0]===p[0]&&q[1]===p[1])===i);
       if(distinct.length>=2){ D.map.fitBounds(L.latLngBounds(distinct),{paddingTopLeft:[34,56],paddingBottomRight:[34,34],maxZoom:15,animate:false}); framed=true; }
     }
     if(!framed) D.map.fitBounds(L.latLngBounds(linePts),{padding:[26,26],maxZoom:16,animate:false});
     const zl=$("drvZoomLbl"); if(zl) zl.textContent=framed?"Framed on your bus":"Full route view";
+  }
+  // Self-healing size repair (driver map only): the invalidateSize()
+  // before the first fit is silently ignored by Leaflet while the map
+  // has no view yet, so a fit consumed at a cached 0x0 size (container
+  // hidden behind the gate / during hidden renders) used to stick
+  // forever and leave finger gestures disconnected from the content.
+  // Once the map has a view, a Leaflet size of 0 or one that differs
+  // from the element's client size is repaired here; a fit performed
+  // while the size was 0 does not count — the fit key is reset so the
+  // next draw re-runs the same framing at the repaired size. Update
+  // ticks never move the camera otherwise.
+  if(D.map.getSize&&typeof D.map.getZoom==="function"&&typeof D.map.getZoom()==="number"){
+    const sz=D.map.getSize();
+    if(sz&&(sz.x===0||sz.y===0||sz.x!==cw||sz.y!==ch)){
+      D.map.invalidateSize();
+      if(fitRan&&sizeAtFit&&(sizeAtFit.x===0||sizeAtFit.y===0)) D.fitKey="";
+    }
   }
 }
 function zoomDriver(dir){
@@ -3115,11 +3254,14 @@ function renderDriver(){
   const route=DATA.routes.find(r=>r.id===state.routeId);
   const now=nowMin();
   const stops=routeStops(route);
-  // A stop counts as reached purely from the shared real clock: its
-  // live time (chart + any admin-set delay) has arrived. Same rule the
-  // student view uses for "passed", so both views always agree.
+  // While on duty with a fresh own GPS fix, reached/next follows the
+  // driver's own position along the route (driverProgressFor); without
+  // one, a stop counts as reached purely from the shared real clock:
+  // its live time (chart + any admin-set delay) has arrived. Same rule
+  // the student view uses for "passed", so both views always agree.
+  const prog=driverProgressFor(route);
   const rows=stops.map((s,i)=>({s:s,i:i,ct:chartTime(s),lt:liveTime(route,s)}));
-  const isDone=x=>x.lt!==null&&x.lt<=now;
+  const isDone=x=>prog?!!prog.reached[x.i]:(x.lt!==null&&x.lt<=now);
   const doneN=rows.filter(isDone).length;
   const nextX=rows.find(x=>!isDone(x));
   const status=autoStatus(route);
@@ -3130,7 +3272,17 @@ function renderDriver(){
   if(nextX){
     $("drvNextLabel").textContent=doneN===0?"First stop":"Next stop";
     $("drvNextName").textContent=nextX.s.n;
-    $("drvNextTimes").innerHTML="Chart time <b>"+(nextX.s.request?"— (request stop)":nextX.s.campusEst?"— (estimate, no printed time)":(nextX.ct===null?"—":fmt(nextX.ct)))+"</b> &nbsp;•&nbsp; Live ETA <b>"+(nextX.lt===null?"—":(nextX.s.campusEst?"~":"")+fmt(nextX.lt))+"</b>"+(nextX.lt!==null?" &nbsp;•&nbsp; in about <b>"+Math.max(0,Math.round(nextX.lt-now))+" min</b>":"");
+    const chartHtml="Chart time <b>"+(nextX.s.request?"— (request stop)":nextX.s.campusEst?"— (estimate, no printed time)":(nextX.ct===null?"—":fmt(nextX.ct)))+"</b>";
+    if(prog&&prog.alongs[nextX.i]!==null){
+      // GPS progression: never claim a schedule "in about 0 min" for a
+      // stop the driver's own fix says is still ahead — keep the chart
+      // time and show the GPS road distance still to go instead.
+      const remainKm=Math.max(0,prog.alongs[nextX.i]-prog.along);
+      const distHtml=remainKm>=1?remainKm.toFixed(1)+" km":Math.round(remainKm*1000)+" m";
+      $("drvNextTimes").innerHTML=chartHtml+" &nbsp;•&nbsp; <b>"+distHtml+"</b> to go (GPS)";
+    } else {
+      $("drvNextTimes").innerHTML=chartHtml+" &nbsp;•&nbsp; Live ETA <b>"+(nextX.lt===null?"—":(nextX.s.campusEst?"~":"")+fmt(nextX.lt))+"</b>"+(nextX.lt!==null?" &nbsp;•&nbsp; in about <b>"+Math.max(0,Math.round(nextX.lt-now))+" min</b>":"");
+    }
   } else {
     $("drvNextLabel").textContent="Route finished";
     $("drvNextName").textContent="Back at Gamaharia Campus";
@@ -3553,6 +3705,7 @@ function renderAdmin(){
 function placeControls(){
   const bar=$("controlsBar"); if(!bar) return;
   document.body.classList.toggle("is-admin",state.role==="admin");
+  document.body.classList.toggle("is-driver",state.role==="driver");
   if(state.role==="admin"){
     const home=$("controlsHome");
     if(home&&bar.parentElement!==home) home.appendChild(bar);
@@ -3649,6 +3802,9 @@ $("locateBtn").addEventListener("click",()=>{ S.fitKey=""; if(curDrawn) drawMap(
     }catch(e){ onErr(null,false); }
   }
   btn.addEventListener("click",()=>{
+    // Driver sessions never run this flow: the group is hidden for the
+    // driver role, and Start duty is the driver's location broadcast.
+    if(state.role==="driver") return;
     if(!("geolocation" in navigator)){ showHelp("<b>Location isn't available in this browser.</b> Your stop wasn't changed — pick it from the list instead."); return; }
     if(window.isSecureContext===false){ showHelp("<b>Location needs a secure (https) page.</b> Your stop wasn't changed — pick it from the list instead."); return; }
     // If the frame around this page forbids geolocation outright, the
