@@ -854,7 +854,9 @@ body.is-admin #view-admin{margin-top:2px}
    enhanceSelect() every time it opens: CSS alone cannot know where the
    control sits on a narrow screen, and an unclamped min-width / max-content
    panel anchored at left:0 can spill past the right edge (or, for the
-   right-anchored user menu, the left edge) and clip its rows. */
+   right-anchored user menu, the left edge) and clip its rows, or spill
+   below the fold with no internal scroll. clampPop handles both axes;
+   the list's own max-height below is only the plenty-of-room cap. */
 .csel-pop{position:absolute;top:calc(100% + 6px);left:0;width:100%;min-width:min(260px,calc(100vw - 16px));max-width:calc(100vw - 16px);z-index:80;background:var(--surface);border:1px solid var(--line);border-radius:18px;box-shadow:0 18px 44px rgba(0,0,0,.24);padding:6px;animation:cselIn .16s ease}
 .csel-inline .csel-pop{width:max-content;max-width:calc(100vw - 16px)}
 @keyframes cselIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
@@ -1061,6 +1063,9 @@ select.admsel{padding:10px 14px;border-radius:999px;border:1px solid var(--line)
 .belowgrid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}
 /* ---------- driver ---------- */
 #drvMap{width:100%;height:440px;display:block;border-radius:14px;border:1px solid var(--line);background:#e9e7df;z-index:0}
+.drvmapwrap{position:relative}
+#drvLocateBtn{position:absolute;right:14px;bottom:30px;z-index:30;width:48px;height:48px;border-radius:50%;border:0;background:#000;display:grid;place-items:center;cursor:pointer;box-shadow:0 6px 16px rgba(0,0,0,.35)}
+#drvLocateBtn svg{fill:#fff;display:block}
 #admMap{width:100%;height:460px;display:block;border-radius:14px;border:1px solid var(--line);background:#e9e7df;z-index:0}
 @media(max-width:900px){#admMap{height:360px}}
 .drvnext{background:#000;color:#fff;border-radius:20px;padding:22px;margin-top:14px}
@@ -1137,6 +1142,7 @@ select.admsel{padding:10px 14px;border-radius:999px;border:1px solid var(--line)
  #map{height:62vh;min-height:380px;border-radius:20px}
  #stopsBtn{top:54px;right:10px;padding:10px 14px;font-size:12.5px}
  #locateBtn{width:44px;height:44px;right:10px}
+ #drvLocateBtn{width:44px;height:44px;right:10px;bottom:28px}
  #busLegend{right:62px;bottom:126px;font-size:11.5px;padding:6px 11px}
  /* Sheet below the map: the earliest-bus answer stays prominent,
     everything else gets consistent, smaller breathing room. */
@@ -1442,7 +1448,10 @@ select.admsel{padding:10px 14px;border-radius:999px;border:1px solid var(--line)
         <div class="card">
           <h2>Route map — live position</h2>
           <p class="sub">The larger black pin is your next stop.</p>
-          <div id="drvMap" style="margin-top:12px" role="application" aria-label="Live route map for the driver — interactive Leaflet map"></div>
+          <div class="drvmapwrap" style="margin-top:12px">
+            <div id="drvMap" role="application" aria-label="Live route map for the driver — interactive Leaflet map"></div>
+            <button id="drvLocateBtn" type="button" aria-label="Re-centre the driver map on your bus" title="Re-centre map — your bus"><svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 4 4 4 4 0 0 0-4-4zm8.94 3A9 9 0 0 0 13 3.06V1h-2v2.06A9 9 0 0 0 3.06 11H1v2h2.06A9 9 0 0 0 11 20.94V23h2v-2.06A9 9 0 0 0 20.94 13H23v-2zM12 19a7 7 0 1 1 7-7 7 7 0 0 1-7 7z"/></svg></button>
+          </div>
           <div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap">
             <button class="btn-ghost" id="drvZoomOut" type="button">− Zoom out</button>
             <button class="btn-ghost" id="drvZoomIn" type="button">+ Zoom in</button>
@@ -1723,19 +1732,50 @@ function fmt(min){min=((Math.round(min)%1440)+1440)%1440;return String(Math.floo
 function canon(n){return n.toLowerCase().replace(/[^a-z0-9 ]/g,"").split(/\s+/).filter(Boolean).sort().join(" ")}
 const LAL="Gamaharia Lal Building";
 // Full stop sequence for a route+trip: College -> chart stops -> (Lal if needed) -> College
+// Estimate a Campus arrival for a trip whose printed chart has no
+// Campus time (Ghatshila: the chart ends at Khasmahal). From the
+// route's own chart only: the last chart-timed stop with coordinates
+// plus the haversine distance from there to Campus at the trip's
+// average speed — the total haversine distance between consecutive
+// chart-timed stops with coordinates divided by the minutes between
+// the first and last such stops. Null when fewer than two timed
+// stops with coordinates (or no positive span/speed), so the estimate
+// channel stays null exactly as before for those trips.
+function estimateCampusArrival(stops){
+  const timed=stops.filter(function(s){ return toMin(s.t[state.trip])!==null&&s.lat!==null&&s.lon!==null; })
+    .map(function(s){ return {t:toMin(s.t[state.trip]),lat:s.lat,lon:s.lon}; });
+  if(timed.length<2) return null;
+  let dist=0;
+  for(let i=1;i<timed.length;i++) dist+=havKm(timed[i-1].lat,timed[i-1].lon,timed[i].lat,timed[i].lon);
+  const span=timed[timed.length-1].t-timed[0].t;
+  if(span<=0||!(dist>0)) return null;
+  const speed=dist/span; // km per minute
+  if(!(speed>0)) return null;
+  const last=timed[timed.length-1];
+  return last.t+havKm(last.lat,last.lon,CAMPUS.lat,CAMPUS.lon)/speed;
+}
 function routeStops(route){
   const stops=route.stops.map(s=>({...s}));
   if(route.id==="Ghatshila" && stops[stops.length-1].n!=="Gamaharia Campus") stops.push({n:"Gamaharia Campus",lat:CAMPUS.lat,lon:CAMPUS.lon,t:[null,null,null]});
+  const ci=stops.findIndex(s=>s.n==="Gamaharia Campus");
+  // A Campus stop with no printed chart time for this trip carries
+  // only an estimate (est/campusEst): its t array stays null, so
+  // nothing ever presents the estimate as a chart time.
+  let campusT=ci>=0?toMin(stops[ci].t[state.trip]):null;
+  if(ci>=0&&campusT===null){
+    const est=estimateCampusArrival(stops);
+    if(est!==null){ stops[ci].est=est; stops[ci].campusEst=true; }
+  }
   // Insert Lal Building as request stop before campus where the chart doesn't name it
   if(!stops.some(s=>canon(s.n)===canon(LAL))){
-    const ci=stops.findIndex(s=>s.n==="Gamaharia Campus");
-    const campusT=toMin(stops[ci].t[state.trip]);
-    const est=campusT!==null?campusT-13:null;
+    const campusEst=ci>=0&&stops[ci].est!=null?stops[ci].est:null;
+    const baseT=campusT!==null?campusT:campusEst;
+    const est=baseT!==null?baseT-13:null;
     stops.splice(ci,0,{n:LAL,lat:22.8145,lon:86.1026,t:[null,null,null],request:true,est});
   }
   return stops;
 }
-function chartTime(stop){ if(stop.request) return stop.est; return toMin(stop.t[state.trip]); }
+function chartTime(stop){ if(stop.request) return stop.est; if(stop.campusEst) return stop.est; return toMin(stop.t[state.trip]); }
 function delayOf(routeId){ const v=OPS.delays[dbRouteId(routeId)]; return typeof v==="number"?v:0; }
 function liveTime(route,stop){const ct=chartTime(stop); if(ct===null)return null; return ct+delayOf(route.id)}
 function allStopsUnique(){
@@ -1889,12 +1929,15 @@ function busPosition(route){
   const stops=routeStops(route), now=nowMin(), d=delayOf(route.id);
   const gps=gpsFor(route);
   if(gps){
-    // GPS wins while this trip is running: a fresh position from the
-    // driver's phone is the bus's real place, not an interpolation.
-    const gpsTimed=stops.map(function(s){ return chartTime(s); }).filter(function(x){ return x!==null; });
-    if(gpsTimed.length&&now>=Math.min.apply(null,gpsTimed)-30&&now<=Math.max.apply(null,gpsTimed)+30){
-      return {lat:gps.lat, lon:gps.lon, status:"Live GPS — near "+nearestStopName(gps.lat,gps.lon,stops)+" • updated "+fmtClockISO(gps.updated_at)};
-    }
+    // Fresh GPS wins unconditionally: a fresh position from the
+    // driver's phone is the bus's real place, regardless of the trip
+    // state — not started, en route, or past the scheduled campus
+    // arrival. gpsFor() already enforces the <=3-minute freshness
+    // window, so a stale or missing fix falls through to the
+    // schedule interpolation below exactly as before. Only the
+    // marker position changes; every schedule-derived label, ETA
+    // and count elsewhere on the page is untouched.
+    return {lat:gps.lat, lon:gps.lon, status:"Live GPS — near "+nearestStopName(gps.lat,gps.lon,stops)+" • updated "+fmtClockISO(gps.updated_at)};
   }
   const firstT=chartTime(stops[0]);
   // Timed waypoints: the bus leaves College 20 min before the 1st stop's
@@ -2031,7 +2074,14 @@ function lineParts(route,stops,linePts,pos){
     const sp=splitLine(linePts,pos);
     return {done:sp.done,tail:null,todo:sp.todo};
   }
-  const tripDone=!pos||/^Completed/.test(pos.status||"");
+  // Trip-done is judged from the schedule alone (live times), never
+  // from the marker position's status: a fresh GPS fix may now place
+  // the marker away from Campus after the scheduled trip end, and
+  // that must not repaint the line as still travelling. This keeps
+  // the line state exactly as the schedule-only position gave it.
+  const list=stops||routeStops(route);
+  const times=list.map(function(s){ return liveTime(route,s); }).filter(function(t){ return t!==null; });
+  const tripDone=!pos||(times.length>0&&nowMin()>Math.max.apply(null,times));
   if(tripDone) return {done:linePts.slice(),tail:null,todo:[]};
   const sp=splitLineLast(linePts,pos);
   return {done:sp.done,tail:sp.todo,todo:[]};
@@ -2391,7 +2441,8 @@ function syncStudentMap(route,stops,pinned,linePts,pos){
     rowsOut.push('<div class="mstop"'+(pi>=0?' data-pin="'+pi+'"':"")+'><div class="mdot '+(s.lat===null?"none":mine?"you":"")+'"></div><div><b>'+esc(s.n)+'</b><span>'+time+(s.lat===null?" • no pin":"")+'</span></div></div>');
   });
   const last=stops[stops.length-1];
-  rowsOut.push('<div class="mstop"><div class="mdot campus"></div><div><b>Gamaharia Campus</b><span>Trip ends'+(last&&last.t[state.trip]?(" • chart "+last.t[state.trip]):"")+'</span></div></div>');
+  const lastLt=last?liveTime(route,last):null;
+  rowsOut.push('<div class="mstop"><div class="mdot campus"></div><div><b>Gamaharia Campus</b><span>Trip ends'+(last&&last.t[state.trip]?(" • chart "+last.t[state.trip]):(last&&last.campusEst&&lastLt!==null?(" • ~"+fmt(lastLt)+" (estimate)"):""))+'</span></div></div>');
   $("mapStops").innerHTML=rowsOut.join("");
   // Home fit — only on selection change / first show / locate button.
   // Refresh ticks never re-fit (fitKey is unchanged), so a student's
@@ -2555,7 +2606,7 @@ function renderStudent(){
   const icpt=computeIntercept(), iBox=$("interceptBox");
   if(icpt&&iBox){
     iBox.style.display="block";
-    $("interceptMain").innerHTML="Catch "+(icpt.bus.busNo?"<b>"+esc(icpt.bus.busNo)+"</b> ":"")+"("+icpt.bus.route.id+") at <b>"+esc(icpt.stop.n)+"</b> — bus reaches there at <b>"+fmt(icpt.lt)+"</b>";
+    $("interceptMain").innerHTML="Catch "+(icpt.bus.busNo?"<b>"+esc(icpt.bus.busNo)+"</b> ":"")+"("+icpt.bus.route.id+") at <b>"+esc(icpt.stop.n)+"</b> — bus reaches there at <b>"+fmt(icpt.lt)+"</b>"+(icpt.stop.campusEst?' <span style="font-size:13px;opacity:.85">Live estimate — no printed chart time.</span>':"");
     $("interceptSub").textContent=icpt.distKm.toFixed(1)+" km from "+state.stopName+" • You have about "+Math.max(0,Math.round(icpt.minsLeft))+" min before the bus gets there (about "+Math.max(1,Math.round(icpt.travelMin))+" min by auto at ~20 km/h)";
     const v=$("interceptVerdict");
     if(icpt.verdict==="make"){ v.className="intercept-verdict"; v.textContent="You can make it if you leave now"; }
@@ -2591,8 +2642,8 @@ function renderStudent(){
   let rows=[`<div class="ttrow"><span><b>Gamaharia Campus</b> <span class="badge b-teal">Trip begins</span></span><span class="sub">Bus leaves College for the 1st stop</span></div>`];
   stops.forEach((s,i)=>{
     const lt=liveTime(route,s);
-    const st=lt===null?'<span class="badge b-grey">—</span>':lt<now?'<span class="badge b-grey">Passed '+fmt(lt)+'</span>':'<span class="badge b-green">Coming • ETA '+Math.round(lt-now)+' min</span>';
-    rows.push(`<div class="ttrow"><span><b>${s.n}</b> ${i===0?'<span class="badge b-teal">1st stop</span>':""} ${canon(s.n)===canon(state.stopName)?'<span class="badge b-amber">Your stop</span>':""} ${s.request?'<span class="badge b-amber">Request stop</span>':""}</span><span class="sub">Chart ${s.request?"— (no printed time)":(s.t[state.trip]||"—")} • Live ${lt===null?"—":fmt(lt)}</span>${st}</div>`);
+    const st=lt===null?'<span class="badge b-grey">—</span>':lt<now?'<span class="badge b-grey">Passed '+(s.campusEst?"~":"")+fmt(lt)+'</span>':'<span class="badge b-green">Coming • ETA '+Math.round(lt-now)+' min</span>';
+    rows.push(`<div class="ttrow"><span><b>${s.n}</b> ${i===0?'<span class="badge b-teal">1st stop</span>':""} ${canon(s.n)===canon(state.stopName)?'<span class="badge b-amber">Your stop</span>':""} ${s.request?'<span class="badge b-amber">Request stop</span>':""} ${s.campusEst?'<span class="badge b-amber">Estimate</span>':""}</span><span class="sub">Chart ${s.request||s.campusEst?"— (no printed time)":(s.t[state.trip]||"—")} • Live ${lt===null?"—":(s.campusEst?"~":"")+fmt(lt)}</span>${st}</div>`);
   });
   $("ttList").innerHTML=rows.join("");
 }
@@ -2649,6 +2700,44 @@ function initDriverMap(){
   D.todo=L.polyline([],{color:"#0b0b0c",weight:4.5}).addTo(D.map);
   D.stopLayer=L.layerGroup().addTo(D.map);
 }
+// Driver-map plotted position. While on duty the marker follows the
+// freshest real position, in this order: (1) the device's own latest
+// geolocation fix held by the duty code (DUTY.lastPos — the same fix the
+// 30s heartbeat re-sends); (2) a fresh (<=180s, the same freshness rule
+// as gpsFor) bus_locations row for the duty bus; (3) only when neither
+// exists — not on duty, or no fix yet — the schedule-resolved position
+// from busPosition(), unchanged. Applies in ALL trip states, including
+// a completed trip, where the schedule position is Campus. Only the
+// plotted marker's source changes: every schedule-derived label, ETA,
+// passed/reached state and on-time status elsewhere is untouched.
+function driverBusPosition(route){
+  if(DUTY.on&&DUTY.busId){
+    const lp=DUTY.lastPos;
+    if(lp&&lp.lat!=null&&lp.lon!=null){
+      const stops=routeStops(route);
+      return {lat:lp.lat, lon:lp.lon, status:"Live GPS — near "+nearestStopName(lp.lat,lp.lon,stops)+" • your phone's position"};
+    }
+    const loc=OPS.locations[DUTY.busId];
+    if(loc&&loc.lat!=null&&loc.lng!=null){
+      const age=(Date.now()-new Date(loc.updated_at).getTime())/1000;
+      if(age>=0&&age<=180){
+        const stops=routeStops(route);
+        return {lat:loc.lat, lon:loc.lng, status:"Live GPS — near "+nearestStopName(loc.lat,loc.lng,stops)+" • updated "+fmtClockISO(loc.updated_at)};
+      }
+    }
+  }
+  return busPosition(route);
+}
+// Re-centre (target) control for the driver map, matching the student
+// map's locate button: one tap centres on the bus's current resolved
+// position (driverBusPosition) at street-level zoom, capped at 15.
+// Camera-only: it never touches the marker, the route line or any text.
+function recenterDriverMap(){
+  if(!D.map||!drvLast) return;
+  const pos=driverBusPosition(drvLast.route); if(!pos) return;
+  D.map.setView([pos.lat,pos.lon],15,{animate:false});
+  const zl=$("drvZoomLbl"); if(zl) zl.textContent="Centred on your bus";
+}
 function drawDriverMap(route,nextName){
   drvLast={route:route,nextName:nextName};
   const el=$("drvMap"); if(!el) return;
@@ -2656,7 +2745,7 @@ function drawDriverMap(route,nextName){
   const stops=routeStops(route);
   const pinned=stops.filter(s=>s.lat!==null&&s.lon!==null);
   const linePts=routeLine(route);
-  const pos=busPosition(route), now=nowMin();
+  const pos=driverBusPosition(route), now=nowMin();
   const cw=el.clientWidth, ch=el.clientHeight;
   if(!cw||!ch){ D.wasHidden=true; return; }
   if(D.wasHidden||cw!==D.sizeW||ch!==D.sizeH){ D.sizeW=cw; D.sizeH=ch; D.wasHidden=false; D.map.invalidateSize(); }
@@ -2707,7 +2796,7 @@ function drawDriverMap(route,nextName){
 }
 function zoomDriver(dir){
   if(!D.map||!drvLast) return;
-  const pos=busPosition(drvLast.route);
+  const pos=driverBusPosition(drvLast.route);
   const z=D.map.getZoom()+dir;
   if(pos) D.map.setZoomAround(L.latLng(pos.lat,pos.lon),z);
   else if(dir>0) D.map.zoomIn(); else D.map.zoomOut();
@@ -2733,7 +2822,7 @@ function renderDriver(){
   if(nextX){
     $("drvNextLabel").textContent=doneN===0?"First stop":"Next stop";
     $("drvNextName").textContent=nextX.s.n;
-    $("drvNextTimes").innerHTML="Chart time <b>"+(nextX.s.request?"— (request stop)":(nextX.ct===null?"—":fmt(nextX.ct)))+"</b> &nbsp;•&nbsp; Live ETA <b>"+(nextX.lt===null?"—":fmt(nextX.lt))+"</b>"+(nextX.lt!==null?" &nbsp;•&nbsp; in about <b>"+Math.max(0,Math.round(nextX.lt-now))+" min</b>":"");
+    $("drvNextTimes").innerHTML="Chart time <b>"+(nextX.s.request?"— (request stop)":nextX.s.campusEst?"— (estimate, no printed time)":(nextX.ct===null?"—":fmt(nextX.ct)))+"</b> &nbsp;•&nbsp; Live ETA <b>"+(nextX.lt===null?"—":(nextX.s.campusEst?"~":"")+fmt(nextX.lt))+"</b>"+(nextX.lt!==null?" &nbsp;•&nbsp; in about <b>"+Math.max(0,Math.round(nextX.lt-now))+" min</b>":"");
   } else {
     $("drvNextLabel").textContent="Route finished";
     $("drvNextName").textContent="Back at Gamaharia Campus";
@@ -2744,7 +2833,7 @@ function renderDriver(){
   $("drvBar").style.width=(rows.length?Math.round(doneN/rows.length*100):0)+"%";
   $("drvStops").innerHTML=rows.map(x=>{
     const st=isDone(x)?'<span class="badge b-teal">Reached ✓</span>':(nextX&&x.i===nextX.i)?'<span class="badge b-amber">Next stop</span>':'<span class="badge b-green">Upcoming</span>';
-    return `<div class="stoprow"><div class="sdot ${isDone(x)?"passed":""} ${x.s.lat===null?"nopin":""}"></div><div style="flex:1"><b>${x.s.n}</b> ${x.i===0?'<span class="badge b-teal">1st stop</span>':""} ${x.s.request?'<span class="badge b-amber">Request stop</span>':""}<div class="sub">Chart ${x.s.request?"— (no printed time)":(x.s.t[state.trip]||"—")} • Expected ${x.lt===null?"—":fmt(x.lt)}</div></div>${st}</div>`;
+    return `<div class="stoprow"><div class="sdot ${isDone(x)?"passed":""} ${x.s.lat===null?"nopin":""}"></div><div style="flex:1"><b>${x.s.n}</b> ${x.i===0?'<span class="badge b-teal">1st stop</span>':""} ${x.s.request?'<span class="badge b-amber">Request stop</span>':""} ${x.s.campusEst?'<span class="badge b-amber">Estimate</span>':""}<div class="sub">Chart ${x.s.request||x.s.campusEst?"— (no printed time)":(x.s.t[state.trip]||"—")} • Expected ${x.lt===null?"—":(x.s.campusEst?"~":"")+fmt(x.lt)}</div></div>${st}</div>`;
   }).join("");
   renderDuty();
   drawDriverMap(route,nextX?nextX.s.n:null);
@@ -2824,7 +2913,7 @@ function drawAdminMap(){
 }
 
 // ---------- Driver duty (GPS source) + Admin fleet/allotment editors ----------
-let DUTY={on:false, busId:null, watchId:null, lastSent:0, lastPos:null, lastHist:0, lastSentAt:null};
+let DUTY={on:false, busId:null, watchId:null, heartbeatId:null, lastSent:0, lastPos:null, lastHist:0, lastSentAt:null};
 function dutyBusOptions(){
   const todayTrips={};
   Object.keys(OPS.allotByTrip).forEach(function(tid){ todayTrips[OPS.allotByTrip[tid].bus_id]=tid; });
@@ -2869,9 +2958,17 @@ function renderDuty(){
 }
 function onDutyError(err){
   const el=$("drvDutyErr");
+  // Transient signal loss (position unavailable / timeout) must NOT
+  // end the duty: the watch and the 30-second heartbeat keep running,
+  // and only a non-terminal warning is shown. A later successful
+  // position send clears it, exactly as sendDutyPosition /
+  // heartbeatDutyPosition already clear the error line on success.
+  if(err&&(err.code===2||err.code===3)){
+    if(el) el.textContent="Signal lost — still on duty. Keep this page open; your position will send again when the signal returns.";
+    return;
+  }
   let msg="Couldn't get your location — duty could not start. Check that Location is on for your device and allowed for this site, then try again.";
   if(err&&err.code===1) msg="Location permission was denied, so duty could not start. Allow Location for this site in your browser settings, then tap Start duty again.";
-  else if(err&&err.code===3) msg="Location timed out — try Start duty again with a clearer signal.";
   if(el) el.textContent=msg;
   endDuty(true);
 }
@@ -2880,9 +2977,13 @@ async function sendDutyPosition(pos){
   const nowMs=Date.now();
   const moved=DUTY.lastPos?havKm(DUTY.lastPos.lat,DUTY.lastPos.lon,c.latitude,c.longitude)*1000:Infinity;
   if(nowMs-DUTY.lastSent<10000&&moved<25) return;
-  DUTY.lastSent=nowMs; DUTY.lastPos={lat:c.latitude, lon:c.longitude};
+  DUTY.lastSent=nowMs;
+  const speedKmh=(c.speed==null?null:Math.round(c.speed*3.6*10)/10), heading=(c.heading==null?null:c.heading);
+  // Keep speed/heading with the last known position so the heartbeat
+  // below can re-send the identical fix, not a stripped-down one.
+  DUTY.lastPos={lat:c.latitude, lon:c.longitude, speed_kmh:speedKmh, heading:heading};
   try{
-    await upsertLocation(DUTY.busId, c.latitude, c.longitude, (c.speed==null?null:Math.round(c.speed*3.6*10)/10), (c.heading==null?null:c.heading));
+    await upsertLocation(DUTY.busId, c.latitude, c.longitude, speedKmh, heading);
     DUTY.lastSentAt=new Date().toISOString();
     if(nowMs-DUTY.lastHist>=30000){ DUTY.lastHist=nowMs; try{ await insertHistory(DUTY.busId, c.latitude, c.longitude); }catch(e){} }
     const el=$("drvDutyErr"); if(el) el.textContent="";
@@ -2891,7 +2992,29 @@ async function sendDutyPosition(pos){
     const el=$("drvDutyErr"); if(el) el.textContent="Couldn't send your position: "+sbFriendly(e)+" Duty stays on — check your account is a driver account.";
   }
 }
-function onDutyPosition(pos){ if(!DUTY.on) return; sendDutyPosition(pos); }
+// Duty heartbeat: a stationary phone sends no watchPosition events,
+// so without this its fix would go stale (>3 min) and the student view
+// would fall back to the schedule position mid-trip. Every 30s the
+// last known position is re-upserted as-is (same bus, lat/lng, speed
+// and heading; updated_at becomes now), keeping the fix fresh while
+// the bus stands still. Deliberately NOT a real position event: it
+// touches neither the ~10s/~25m throttle (lastSent) nor the history
+// throttle (lastHist), so no history rows are written by heartbeats.
+async function heartbeatDutyPosition(){
+  if(!DUTY.on||!DUTY.busId||!DUTY.lastPos) return;
+  try{
+    await upsertLocation(DUTY.busId, DUTY.lastPos.lat, DUTY.lastPos.lon, DUTY.lastPos.speed_kmh, DUTY.lastPos.heading);
+    DUTY.lastSentAt=new Date().toISOString();
+    const el=$("drvDutyErr"); if(el) el.textContent="";
+    renderDuty();
+    if(drvLast&&D.map) drawDriverMap(drvLast.route,drvLast.nextName);
+  }catch(e){
+    const el=$("drvDutyErr"); if(el) el.textContent="Couldn't send your position: "+sbFriendly(e)+" Duty stays on — check your account is a driver account.";
+  }
+}
+function stopDutyHeartbeat(){ if(DUTY.heartbeatId!=null){ clearInterval(DUTY.heartbeatId); DUTY.heartbeatId=null; } }
+function startDutyHeartbeat(){ stopDutyHeartbeat(); DUTY.heartbeatId=setInterval(heartbeatDutyPosition,30000); }
+function onDutyPosition(pos){ if(!DUTY.on) return; sendDutyPosition(pos); if(drvLast&&D.map) drawDriverMap(drvLast.route,drvLast.nextName); }
 function startDuty(){
   const sel=$("drvBusSel"); const err=$("drvDutyErr");
   const busId=sel?sel.value:"";
@@ -2899,6 +3022,10 @@ function startDuty(){
   if(!("geolocation" in navigator)){ if(err) err.textContent="Location isn't available in this browser — duty can't start."; return; }
   if(err) err.textContent="";
   DUTY.on=true; DUTY.busId=busId; DUTY.lastSent=0; DUTY.lastPos=null; DUTY.lastHist=0;
+  // Heartbeat first (it no-ops until the first real fix lands), then
+  // the watch. startDutyHeartbeat() clears any existing interval, so
+  // starting duty again can never stack two heartbeats.
+  startDutyHeartbeat();
   const at=allotmentTripForBus(busId);
   if(at){ state.routeId=at.route.id; state.trip=at.kind; }
   renderDuty(); renderAll();
@@ -2907,8 +3034,9 @@ function startDuty(){
 }
 function endDuty(silent){
   if(DUTY.watchId!=null&&"geolocation" in navigator){ try{ navigator.geolocation.clearWatch(DUTY.watchId); }catch(e){} }
+  stopDutyHeartbeat();
   const wasOn=DUTY.on;
-  DUTY.on=false; DUTY.busId=null; DUTY.watchId=null;
+  DUTY.on=false; DUTY.busId=null; DUTY.watchId=null; DUTY.lastPos=null;
   if(wasOn&&!silent){ const el=$("drvDutyErr"); if(el) el.textContent="Duty ended — location sharing stopped."; }
   renderDuty();
 }
@@ -3113,6 +3241,7 @@ $("locateBtn").addEventListener("click",()=>{ S.fitKey=""; if(curDrawn) drawMap(
 $("admDelayRoute").addEventListener("change",e=>{state.admDelayRoute=e.target.value; renderAll();});
 $("drvZoomIn").addEventListener("click",()=>zoomDriver(1));
 $("drvZoomOut").addEventListener("click",()=>zoomDriver(-1));
+$("drvLocateBtn").addEventListener("click",()=>recenterDriverMap());
 document.querySelectorAll("#admDelayBtns .btn-ghost").forEach(b=>b.addEventListener("click",async ()=>{const dr=state.admDelayRoute||state.routeId; const mins=+b.dataset.delay; const note=$("admDelayNote"); b.disabled=true; try{ await setDelay(dr,mins); if(note) note.textContent=mins?("Saved: +"+mins+" min delay for "+dr+" today."):"Saved: "+dr+" is on time today."; }catch(err){ if(note) note.textContent="Couldn't save the delay: "+sbFriendly(err)+" Only an admin account can set delays."; } finally{ b.disabled=false; renderAll(); } }));
 // ---- On-demand detail panels (student view) ---------------------------
 // The sheet's long lists and the full timetable are collapsed by default
@@ -3151,7 +3280,7 @@ $("mapStops").addEventListener("click",e=>{
 });
 window.addEventListener("resize",()=>{ S.sizeW=0; D.sizeW=0; A.sizeW=0; if(state.role==="student"&&curDrawn) drawMap(curDrawn.route); if(state.role==="driver"&&drvLast) drawDriverMap(drvLast.route,drvLast.nextName); if(state.role==="admin") drawAdminMap(); });
 // Small read handle for automated checks of the live map state.
-window.__aju={studentMap:()=>S.map,driverMap:()=>D.map,adminMap:()=>A.map,adminBusMarkers:()=>A.markers,selBusMarker:()=>S.selBus,otherBusMarkers:()=>S.others,pinMarkers:()=>S.pinMarkers,base:()=>S.base,adminBase:()=>A.base,busPosition:busPosition,nowMin:nowMin,state:state,DATA:DATA,refresh:()=>{ if(curDrawn) drawMap(curDrawn.route); }};
+window.__aju={studentMap:()=>S.map,driverMap:()=>D.map,adminMap:()=>A.map,adminBusMarkers:()=>A.markers,selBusMarker:()=>S.selBus,otherBusMarkers:()=>S.others,pinMarkers:()=>S.pinMarkers,base:()=>S.base,adminBase:()=>A.base,busPosition:busPosition,driverBusPosition:driverBusPosition,recenterDriverMap:recenterDriverMap,duty:()=>DUTY,nowMin:nowMin,state:state,DATA:DATA,refresh:()=>{ if(curDrawn) drawMap(curDrawn.route); }};
 // ---- Site-styled dropdowns ---------------------------------------------
 // The popup list of a native <select> is drawn by the OS — black list,
 // blue highlight, grey scrollbar — and no CSS can theme it. So each
@@ -3227,14 +3356,20 @@ function enhanceSelect(sel){
     syncLabel();
     if(!open) buildList(); // while open, leave the rows/scroll/search alone; rebuilt on next open
   }
-  // Keep the open panel fully inside the viewport on any screen width:
-  // cap its width to the viewport minus margins, then shift it sideways
-  // (relative to its .csel wrapper) until both edges are on screen. The
-  // panel is absolutely positioned, so without this an anchored panel can
-  // start off-screen or spill past the far edge and clip its row text —
-  // and create horizontal page overflow while open.
+  // Keep the open panel fully inside the viewport on any screen width
+  // AND height: cap its width to the viewport minus margins, then shift
+  // it sideways (relative to its .csel wrapper) until both edges are on
+  // screen; vertically, open above the anchor when there is not room
+  // below and above fits better, and cap the panel to the space
+  // available on the chosen side so the option list scrolls internally
+  // instead of spilling below the fold. The panel is absolutely
+  // positioned, so without this an anchored panel can start off-screen
+  // or spill past the far edge and clip its rows — and create
+  // horizontal page overflow while open. When there is plenty of room
+  // nothing here changes the panel: it opens below at its natural size.
   function clampPop(){
     pop.style.left=""; pop.style.width="";
+    pop.style.top=""; pop.style.bottom=""; pop.style.maxHeight=""; list.style.maxHeight="";
     var vw=document.documentElement.clientWidth||window.innerWidth, m=8;
     var r=pop.getBoundingClientRect();
     if(r.width>vw-2*m){ pop.style.width=(vw-2*m)+"px"; r=pop.getBoundingClientRect(); }
@@ -3242,6 +3377,40 @@ function enhanceSelect(sel){
     if(r.left<m) shift=m-r.left;
     else if(r.right>vw-m) shift=(vw-m)-r.right;
     if(shift) pop.style.left=shift+"px";
+    // Vertical clamp: measure again after the horizontal clamp (a
+    // narrower panel can grow taller as rows wrap), then flip above
+    // the anchor only when below does not fit and above fits better,
+    // and cap to the space on the chosen side. Spaces are measured
+    // from the wrapper's edges: the panel is anchored to the wrapper,
+    // and its edge can sit a few px from the button's edge.
+    var vh=document.documentElement.clientHeight||window.innerHeight;
+    var anchorR=wrap.getBoundingClientRect();
+    var gap=6;
+    var spaceBelow=vh-m-(anchorR.bottom+gap);
+    var spaceAbove=anchorR.top-gap-m;
+    r=pop.getBoundingClientRect();
+    var need=r.height;
+    var openAbove=need>spaceBelow&&spaceAbove>spaceBelow;
+    if(openAbove){ pop.style.top="auto"; pop.style.bottom="calc(100% + 6px)"; }
+    var avail=openAbove?spaceAbove:spaceBelow;
+    if(need>avail&&avail>0){
+      var chrome=r.height-list.getBoundingClientRect().height;
+      pop.style.maxHeight=avail+"px";
+      list.style.maxHeight=Math.max(avail-chrome,0)+"px";
+    }
+    // Correct for any residual offset between the measured anchor and
+    // the panel's actual edge: if the panel still breaches the 8px
+    // margin, shrink it by exactly the breach so it fits.
+    var r2=pop.getBoundingClientRect();
+    var breach=0;
+    if(r2.top<m) breach=m-r2.top;
+    else if(r2.bottom>vh-m) breach=r2.bottom-(vh-m);
+    if(breach>0){
+      var curH=r2.height;
+      var chrome2=curH-list.getBoundingClientRect().height;
+      pop.style.maxHeight=Math.max(curH-breach,0)+"px";
+      list.style.maxHeight=Math.max(curH-breach-chrome2,0)+"px";
+    }
   }
   function openPop(){
     if(cselOpenInst&&cselOpenInst!==inst) cselOpenInst.close();
