@@ -7,18 +7,18 @@
 <script>
 /* Paint-time gate lock — runs synchronously in <head>, before the first
    frame can paint. It mirrors the session check in the auth block at the
-   bottom of this file (same storage keys, same rule: "__admin__" or an
-   email present in basaarah_users) and stamps <html> with pre-gate or
+   bottom of this file (a stored Supabase session in basaarah_sb_session
+   whose access token has not expired) and stamps <html> with pre-gate or
    pre-app. The CSS then keeps the app chrome display:none from frame one
    when logged out, instead of the end-of-body script having to catch up
    and hide an already-painted app — that catch-up window was the
    split-second flash of the tracker behind the login gate. Any storage
-   error fails safe to the gate, exactly like getSession()/findUser(). */
+   error fails safe to the gate, exactly like the auth block. Old demo
+   keys are removed here: real accounts supersede them. */
 (function(){try{
-  var s=(localStorage.getItem("basaarah_session")||"").trim().toLowerCase(), ok=false;
-  if(s==="__admin__") ok=true;
-  else if(s){ var u=JSON.parse(localStorage.getItem("basaarah_users")||"[]");
-    if(Array.isArray(u)) for(var i=0;i<u.length;i++){ if(u[i]&&u[i].email===s){ ok=true; break; } } }
+  try{ localStorage.removeItem("basaarah_users"); localStorage.removeItem("basaarah_session"); }catch(e){}
+  var raw=localStorage.getItem("basaarah_sb_session"), ok=false;
+  if(raw){ try{ var s=JSON.parse(raw); if(s&&s.access_token&&s.expires_at&&s.expires_at>Date.now()+30000) ok=true; }catch(e){} }
   document.documentElement.classList.add(ok?"pre-app":"pre-gate");
 }catch(e){ document.documentElement.classList.add("pre-gate"); }})();
 </script>
@@ -766,6 +766,7 @@ html.pre-app #authView{display:none!important}
 .pw-toggle:focus-visible{outline:2px solid #f5a623;outline-offset:-2px}
 .ferr{color:#b3261e;font-size:13px;font-weight:600;margin:6px 0 0}
 .auth-err{background:#fdecea;color:#8c1d18;border-radius:12px;padding:10px 13px;font-size:13.5px;font-weight:700;margin:0 0 14px}
+.auth-err.ok{background:#e6f4ea;color:#137333}
 .auth-submit{width:100%;height:56px;margin-top:10px;border:0;border-radius:14px;cursor:pointer;background:#f5a623;color:#0b0b0c;font:inherit;font-size:16.5px;font-weight:800;letter-spacing:.01em;box-shadow:0 6px 16px rgba(245,166,35,.35)}
 .auth-submit:hover{background:#f7b13e}
 .auth-submit:active{transform:scale(.985)}
@@ -1279,11 +1280,11 @@ select.admsel{padding:10px 14px;border-radius:999px;border:1px solid var(--line)
       <div class="admin-card">
         <div class="admin-eyebrow">बसaarah · Restricted</div>
         <h2 class="admin-h">Admin</h2>
-        <p class="admin-sub">Transport office access only. There is no sign-up for admin accounts.</p>
+        <p class="admin-sub">Transport office access only. Sign in with the email of an account that has been made an admin — there is no admin sign-up here.</p>
         <form id="adminForm" novalidate>
           <div class="field">
-            <label for="admLoginId">Admin ID</label>
-            <input id="admLoginId" type="text" autocomplete="username" placeholder="Admin ID">
+            <label for="admLoginId">Email</label>
+            <input id="admLoginId" type="email" autocomplete="email" placeholder="you@example.com">
             <p class="ferr" id="err-admLoginId" hidden></p>
           </div>
           <div class="field">
@@ -1424,6 +1425,18 @@ select.admsel{padding:10px 14px;border-radius:999px;border:1px solid var(--line)
           <div class="kpi"><b id="drvClock">—</b><span>current time</span></div>
         </div>
         <div class="progress"><div id="drvBar" style="width:0%"></div></div>
+        <div class="dutybox" id="dutyBox">
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between">
+            <div><b>On-duty GPS</b><p class="sub" id="drvDutyNote" style="margin:4px 0 0">Off duty — your location is not shared.</p></div>
+            <span class="badge b-grey" id="drvDutyBadge" style="font-size:14px;padding:8px 14px">Off duty</span>
+          </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px">
+            <label class="sub" for="drvBusSel" style="font-weight:700">Bus I am driving</label>
+            <select class="admsel" id="drvBusSel" aria-label="Bus you are driving"></select>
+            <button class="btn-ghost" id="drvDutyBtn" type="button">Start duty</button>
+          </div>
+          <p class="sub" id="drvDutyErr" style="margin:10px 0 0" role="status"></p>
+        </div>
       </div>
       <div class="grid" style="margin-top:0">
         <div class="card">
@@ -1464,13 +1477,24 @@ select.admsel{padding:10px 14px;border-radius:999px;border:1px solid var(--line)
         <div style="display:grid;gap:8px;margin-top:12px" id="admFleet"></div>
       </div>
       <div class="card">
-        <h2>Today's allotment — bus number per route</h2>
-        <p class="sub">Changes apply to the student and driver views right away.</p>
+        <h2>Fleet — buses</h2>
+        <p class="sub">Bus numbers the transport office runs. Add a bus here before allotting it to a route.</p>
+        <div style="display:grid;gap:8px;margin-top:12px" id="admBusList"></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px">
+          <input class="busnum" id="admBusNum" placeholder="Bus no." aria-label="New bus number" style="width:130px">
+          <button class="btn-ghost" id="admBusAdd" type="button">Add bus</button>
+        </div>
+        <p class="sub" id="admBusNote" style="margin-top:10px"></p>
+      </div>
+      <div class="card">
+        <h2>Today's allotment — <span id="admAllotTrip"></span></h2>
+        <p class="sub">Pick the bus running each route in the trip shown on the fleet map above. Saved to the shared database — every student's phone sees it.</p>
         <div style="display:grid;gap:8px;margin-top:12px" id="admAllot"></div>
+        <p class="sub" id="admAllotNote" style="margin-top:10px"></p>
       </div>
       <div class="card">
         <h2>Delay override — admin only</h2>
-        <p class="sub">Applies to the trip selected on the fleet map above (<b id="admDelayTrip"></b>). Student ETAs shift everywhere at once.</p>
+        <p class="sub">Applies today to every trip on the chosen route. Student ETAs shift everywhere at once.</p>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px">
           <select class="admsel" id="admDelayRoute" aria-label="Route for delay override"></select>
           <div style="display:flex;gap:8px;flex-wrap:wrap" id="admDelayBtns">
@@ -1511,17 +1535,191 @@ const UNCONFIRMED=["Bajrangbali Mandir (Baridih)","Kulgora","Plaza","Akashwani C
 // Sample per-day allotment (demo). Bus numbers rotate daily except fixed routes.
 const state={
   role:"student", trip:0, routeId:"Route 8", stopName:"Gamaharia Lal Building",
-  allot:{"Route 1":"Bus 12","Route 2":"Bus 4","Route 3":"Bus 21","Route 4":"Bus 7","Route 5":"Bus 15","Route 6":"Bus 3","Route 7":"Bus 18","Route 8":"Bus 8","Route 9":"Bus 26","Route 10":"Bus 11","Ghatshila":"Bus 31"},
-  fixed:{"Route 8":true,"Ghatshila":true},
+  // Allotment and delays come from the shared database (loadOps below)
+  // — no bus number is hardcoded here.
   delays:{}, admDelayRoute:"Route 8"
 };
+// ---------- Real backend: Supabase, plain fetch only (no libraries) ----------
+// The anon key below is public by design: it ships in the page and only
+// identifies the project. What anyone may read or write is decided by the
+// database's row-level security rules, enforced on the server.
+const SB_URL="https://mfrhcoypgtzoifxekltu.supabase.co";
+const SB_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1mcmhjb3lwZ3R6b2lmeGVrbHR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM1MTIwNjcsImV4cCI6MjEwOTA4ODA2N30.hiY6zxoffLhQaEH6O9PvfruYzzM4jgiAkPP-F8wFswk";
+const SB_SESS_KEY="basaarah_sb_session";
+let sbSession=null;
+function sbLoadStored(){ try{ const s=JSON.parse(localStorage.getItem(SB_SESS_KEY)||"null"); if(s&&s.access_token) sbSession=s; }catch(e){} }
+function sbSaveStored(){ try{ if(sbSession) localStorage.setItem(SB_SESS_KEY,JSON.stringify(sbSession)); else localStorage.removeItem(SB_SESS_KEY); }catch(e){} }
+try{ localStorage.removeItem("basaarah_users"); localStorage.removeItem("basaarah_session"); }catch(e){}
+sbLoadStored();
+function sbAuthHeader(){ return "Bearer "+(sbSession&&sbSession.access_token?sbSession.access_token:SB_KEY); }
+function sbErrFrom(status, data){ const m=(data&&(data.msg||data.message||data.error_description||data.error))||("Request failed ("+status+")"); const e=new Error(String(m)); e.status=status; return e; }
+async function sbRest(path, opts){
+  opts=opts||{};
+  const headers={"apikey":SB_KEY,"Authorization":sbAuthHeader(),"Accept":"application/json"};
+  let body;
+  if(opts.body!==undefined){ headers["Content-Type"]="application/json"; body=JSON.stringify(opts.body); }
+  if(opts.prefer) headers["Prefer"]=opts.prefer;
+  let res, data=null;
+  try{ res=await fetch(SB_URL+"/rest/v1/"+path,{method:opts.method||"GET",headers:headers,body:body}); }
+  catch(e){ const err=new Error("Couldn't reach the database — check your connection and try again."); err.network=true; throw err; }
+  const txt=await res.text();
+  try{ data=txt?JSON.parse(txt):null; }catch(e){ data=null; }
+  if(!res.ok) throw sbErrFrom(res.status, data);
+  return data;
+}
+async function sbAuth(path, body, useAccess){
+  const headers={"apikey":SB_KEY,"Accept":"application/json"};
+  if(useAccess&&sbSession&&sbSession.access_token) headers["Authorization"]="Bearer "+sbSession.access_token;
+  else headers["Authorization"]="Bearer "+SB_KEY;
+  const reqHeaders=Object.assign({}, headers);
+  let reqBody;
+  if(body!==null&&body!==undefined){ reqHeaders["Content-Type"]="application/json"; reqBody=JSON.stringify(body); }
+  let res, data=null;
+  try{ res=await fetch(SB_URL+"/auth/v1/"+path,{method:(body===null||body===undefined)?"GET":"POST",headers:reqHeaders,body:reqBody}); }
+  catch(e){ const err=new Error("Couldn't reach the sign-in service — check your connection and try again."); err.network=true; throw err; }
+  const txt=await res.text();
+  try{ data=txt?JSON.parse(txt):null; }catch(e){ data=null; }
+  if(!res.ok) throw sbErrFrom(res.status, data);
+  return data;
+}
+function sbSetSession(authData, profile){
+  if(!authData) return;
+  sbSession={access_token:authData.access_token, refresh_token:authData.refresh_token||(sbSession&&sbSession.refresh_token)||null, expires_at:Date.now()+((authData.expires_in||3600)*1000), user:authData.user?{id:authData.user.id,email:authData.user.email}:((sbSession&&sbSession.user)||null), profile:profile||(sbSession&&sbSession.profile)||null};
+  sbSaveStored();
+}
+async function sbRefresh(){
+  if(!sbSession||!sbSession.refresh_token) return false;
+  try{ const d=await sbAuth("token?grant_type=refresh_token",{refresh_token:sbSession.refresh_token}); sbSetSession(d, sbSession.profile); return true; }
+  catch(e){ sbSession=null; sbSaveStored(); return false; }
+}
+async function sbEnsureFresh(){
+  if(sbSession&&sbSession.access_token&&sbSession.expires_at>Date.now()+60000) return true;
+  if(sbSession&&sbSession.refresh_token) return await sbRefresh();
+  return !!(sbSession&&sbSession.access_token);
+}
+function sbFriendly(err){
+  const m=String((err&&err.message)||err||"");
+  if(/invalid login credentials/i.test(m)) return "Wrong email or password. Check both and try again.";
+  if(/email not confirmed/i.test(m)) return "Please confirm your email first — check your inbox for the confirmation link, then try again.";
+  if(/user already registered|already registered/i.test(m)) return "An account with this email already exists — try logging in instead.";
+  if(/couldn't reach/i.test(m)) return m;
+  if(/jwt|expired|token/i.test(m)) return "Your session expired — please log in again.";
+  return m||"Something went wrong. Please try again.";
+}
+// Real time, Asia/Kolkata: the one clock for header, ETAs, maps and trips.
+function nowMin(){ const n=new Date(); const ist=new Date(n.getTime()+n.getTimezoneOffset()*60000+330*60000); return ist.getHours()*60+ist.getMinutes()+ist.getSeconds()/60+ist.getMilliseconds()/60000; }
+function todayIST(){ const n=new Date(); const ist=new Date(n.getTime()+n.getTimezoneOffset()*60000+330*60000); return ist.getFullYear()+"-"+String(ist.getMonth()+1).padStart(2,"0")+"-"+String(ist.getDate()).padStart(2,"0"); }
+function fmtClockISO(iso){ try{ const d=new Date(iso); const ist=new Date(d.getTime()+d.getTimezoneOffset()*60000+330*60000); return String(ist.getHours()).padStart(2,"0")+":"+String(ist.getMinutes()).padStart(2,"0"); }catch(e){ return ""; } }
+// Trip-kind mapping shared by the chart model and the database.
+const KIND_OF=["morning","second","afternoon"];
+function dbRouteId(label){ if(label==="Ghatshila") return "route-ghatshila"; const m=/^Route\s+(\d+)/.exec(String(label||"")); return m?("route-"+m[1]):("route-"+String(label).toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"")); }
+DATA.routes.forEach(function(r){ if(!r.dbId) r.dbId=dbRouteId(r.id); });
+function tripIdFor(route, kindIdx){ return dbRouteId(route.id)+"-"+KIND_OF[kindIdx]; }
+function busNumText(n){ return String(n==null?"":n).replace(/^\s*bus\s+/i,"").trim(); }
+const OPS={buses:[], allotByTrip:{}, delays:{}, locations:{}, loaded:false, error:""};
+const STOP_NAMES={}; const STOP_SLUG_BY_NAME={};
+function stopSlugFor(name){ if(!name) return null; return STOP_SLUG_BY_NAME[canon(name)]||null; }
+function allotFor(route, tripIdx){ const tid=tripIdFor(route, tripIdx==null?state.trip:tripIdx); const a=OPS.allotByTrip[tid]; if(!a) return null; const bus=OPS.buses.filter(function(b){ return b.id===a.bus_id; })[0]||null; return {allot:a, bus:bus, label: bus?("Bus "+busNumText(bus.number)):null}; }
+function busLabelFor(route, tripIdx){ const a=allotFor(route, tripIdx); return a&&a.label?a.label:null; }
+function chipFor(routeId){ const r=DATA.routes.filter(function(x){ return x.id===routeId; })[0]; const lbl=r?busLabelFor(r,state.trip):null; return lbl||String(routeId).replace(/^Route /,"R"); }
+function gpsFor(route){ const a=allotFor(route,state.trip); if(!a||!a.bus) return null; const loc=OPS.locations[a.bus.id]; if(!loc||loc.lat==null||loc.lng==null) return null; const age=(Date.now()-new Date(loc.updated_at).getTime())/1000; if(!(age>=0&&age<=180)) return null; return {lat:loc.lat, lon:loc.lng, age:age, updated_at:loc.updated_at, bus:a.bus}; }
+function nearestStopName(lat, lon, stops){ let best=null, bd=Infinity; stops.forEach(function(s){ if(s.lat==null||s.lon==null) return; const d=havKm(lat,lon,s.lat,s.lon); if(d<bd){ bd=d; best=s; } }); return best?best.n:"Gamaria Campus"; }
+function initialTripFor(now){ if(now<8*60+30) return 0; if(now<10*60+45) return 1; return 2; }
+function syncTripButtons(){ document.querySelectorAll("#tripBtns .trip").forEach(function(x){ x.classList.toggle("active", +x.dataset.trip===state.trip); }); document.querySelectorAll("#admTripBtns .atrip").forEach(function(x){ x.classList.toggle("active", +x.dataset.atrip===state.trip); }); }
+let refreshGateStops=null, onChartLoaded=null;
+// Chart data from the database. The chart baked into this page stays only
+// as the fallback if the fetch fails, so the page never renders blank;
+// database data wins whenever it loads.
+async function loadChartFromDB(){
+  try{
+    const stops=await sbRest("stops?select=id,name,lat,lng&order=id&limit=200");
+    const routes=await sbRest("routes?select=id,number,name&order=id&limit=50");
+    const trips=await sbRest("trips?select=id,route_id,kind,campus_arrival&limit=50");
+    const tss=await sbRest("trip_stops?select=trip_id,stop_id,seq,sched&order=trip_id,seq&limit=1000");
+    if(!Array.isArray(stops)||stops.length<50||!Array.isArray(routes)||routes.length<5||!Array.isArray(trips)||trips.length<10||!Array.isArray(tss)||tss.length<100) return false;
+    const stopById={}; stops.forEach(function(s){ stopById[s.id]=s; STOP_NAMES[s.id]=s.name; STOP_SLUG_BY_NAME[canon(s.name)]=s.id; });
+    const byRoute={}; trips.forEach(function(tr){ (byRoute[tr.route_id]=byRoute[tr.route_id]||[]).push(tr); });
+    const tsByTrip={}; tss.forEach(function(ts){ (tsByTrip[ts.trip_id]=tsByTrip[ts.trip_id]||[]).push(ts); });
+    const kindIdx={morning:0,second:1,afternoon:2};
+    function schedStr(s){ return s?String(s).slice(0,5):null; }
+    function routeKey(r){ if(r.id==="route-ghatshila") return 99; const n=parseInt(String(r.id).replace(/\D/g,""),10); return isNaN(n)?50:n; }
+    const sortedRoutes=routes.slice().sort(function(a,b){ return routeKey(a)-routeKey(b); });
+    const built=[];
+    sortedRoutes.forEach(function(rt){
+      const rTrips=byRoute[rt.id]||[];
+      const orderTrip=rTrips.filter(function(x){ return x.kind==="morning"; })[0]||rTrips[0];
+      if(!orderTrip) return;
+      const rows=(tsByTrip[orderTrip.id]||[]).slice().sort(function(a,b){ return a.seq-b.seq; });
+      const stopsArr=[];
+      rows.forEach(function(row){
+        const s=stopById[row.stop_id]; if(!s) return;
+        const tt=[null,null,null];
+        rTrips.forEach(function(tr){ const hits=(tsByTrip[tr.id]||[]).filter(function(x){ return x.stop_id===row.stop_id; }); if(hits[0]) tt[kindIdx[tr.kind]]=schedStr(hits[0].sched); });
+        stopsArr.push({n:s.name, lat:s.lat, lon:s.lng, t:tt, dbStopId:s.id});
+      });
+      if(stopsArr.length) built.push({id:rt.number, dbId:rt.id, stops:stopsArr});
+    });
+    if(built.length<5) return false;
+    DATA.routes=built;
+    const campusStop=stopById["gamaharia-campus"];
+    if(campusStop&&campusStop.lat!=null&&campusStop.lng!=null) DATA.campus={name:campusStop.name, lat:campusStop.lat, lon:campusStop.lng};
+    if(!allStopsUnique().some(function(n){ return canon(n)===canon(state.stopName); })) state.stopName=LAL;
+    if(!DATA.routes.some(function(r){ return r.id===state.routeId; })) state.routeId=DATA.routes[0].id;
+    S.stopsKey=""; S.fitKey=""; D.stopsKey=""; D.fitKey=""; A.linesKey=""; A.fitKey="";
+    if(refreshGateStops) refreshGateStops();
+    if(onChartLoaded) onChartLoaded();
+    renderAll();
+    return true;
+  }catch(e){ return false; }
+}
+// Shared operations data: today's allotments and delays, the fleet list
+// and the latest GPS positions. Polled every ~20s so an admin edit or a
+// driver position shows up on every device.
+async function loadOps(){
+  const today=todayIST();
+  try{
+    const buses=await sbRest("buses?select=id,number,active&order=number&limit=200");
+    const allot=await sbRest("allotments?select=id,service_date,trip_id,bus_id&service_date=eq."+today+"&limit=200");
+    const delays=await sbRest("delays?select=id,service_date,route_id,minutes,created_at&service_date=eq."+today+"&order=created_at.desc&limit=200");
+    const locs=await sbRest("bus_locations?select=bus_id,lat,lng,speed_kmh,heading,updated_at&limit=200");
+    OPS.buses=Array.isArray(buses)?buses:[];
+    OPS.allotByTrip={}; (Array.isArray(allot)?allot:[]).forEach(function(a){ OPS.allotByTrip[a.trip_id]=a; });
+    OPS.delays={}; (Array.isArray(delays)?delays:[]).forEach(function(d){ if(!(d.route_id in OPS.delays)) OPS.delays[d.route_id]=d.minutes; });
+    OPS.locations={}; (Array.isArray(locs)?locs:[]).forEach(function(l){ OPS.locations[l.bus_id]=l; });
+    OPS.loaded=true; OPS.error="";
+    renderAll();
+  }catch(e){ OPS.error=String((e&&e.message)||e); }
+}
+async function fetchProfile(userId){ await sbEnsureFresh(); const rows=await sbRest("profiles?select=id,role,full_name,phone,home_stop&id=eq."+encodeURIComponent(userId)); return (rows&&rows[0])||null; }
+async function upsertProfile(userId, profile){
+  await sbEnsureFresh();
+  try{ await sbRest("profiles",{method:"POST", body:Object.assign({id:userId}, profile)}); }
+  catch(e){ if(e&&e.status===409){ await sbRest("profiles?id=eq."+encodeURIComponent(userId),{method:"PATCH", body:profile, prefer:"return=representation"}); } else throw e; }
+}
+async function setDelay(routeLabel, minutes){ await sbEnsureFresh(); await sbRest("delays",{method:"POST", body:{service_date:todayIST(), route_id:dbRouteId(routeLabel), minutes:minutes}}); await loadOps(); }
+async function setAllotment(tripId, busId){
+  await sbEnsureFresh();
+  if(!busId){ await sbRest("allotments?service_date=eq."+todayIST()+"&trip_id=eq."+encodeURIComponent(tripId),{method:"DELETE"}); }
+  else{ await sbRest("allotments?on_conflict=service_date,trip_id",{method:"POST", body:{service_date:todayIST(), trip_id:tripId, bus_id:busId}, prefer:"resolution=merge-duplicates,return=representation"}); }
+  await loadOps();
+}
+async function addBus(number){ await sbEnsureFresh(); const rows=await sbRest("buses",{method:"POST", body:{number:busNumText(number)}, prefer:"return=representation"}); await loadOps(); return rows; }
+async function setBusActive(id, active){ await sbEnsureFresh(); await sbRest("buses?id=eq."+encodeURIComponent(id),{method:"PATCH", body:{active:active}, prefer:"return=representation"}); await loadOps(); }
+async function removeBus(id){ await sbEnsureFresh(); await sbRest("buses?id=eq."+encodeURIComponent(id),{method:"DELETE"}); await loadOps(); }
+async function upsertLocation(busId, lat, lng, speed, heading){
+  await sbEnsureFresh();
+  const row={bus_id:busId, lat:lat, lng:lng, speed_kmh:(speed==null?null:speed), heading:(heading==null?null:heading), updated_at:new Date().toISOString()};
+  const patched=await sbRest("bus_locations?bus_id=eq."+encodeURIComponent(busId),{method:"PATCH", body:row, prefer:"return=representation"});
+  if(!patched||!patched.length){ await sbRest("bus_locations",{method:"POST", body:row}); }
+}
+async function insertHistory(busId, lat, lng){ await sbEnsureFresh(); await sbRest("bus_location_history",{method:"POST", body:{bus_id:busId, lat:lat, lng:lng}}); }
+
 const $=id=>document.getElementById(id);
 function toMin(t){if(!t)return null;const[h,m]=t.split(":").map(Number);return h*60+m}
 function fmt(min){min=((Math.round(min)%1440)+1440)%1440;return String(Math.floor(min/60)).padStart(2,"0")+":"+String(min%60).padStart(2,"0")}
-// One simulated clock for the whole page: starts 07:12, runs 6x so the
-// morning plays out visibly. Header, map, ETAs and timetables all read it.
-const SIM_START=7*60+12, PAGE_LOAD=Date.now(), SPEED=6;
-function simMin(){return SIM_START+(Date.now()-PAGE_LOAD)/1000*SPEED/60}
+// Real time is the clock for the whole page: nowMin() (Asia/Kolkata,
+// defined in the Supabase block above). Header, map, ETAs and
+// timetables all read it.
 function canon(n){return n.toLowerCase().replace(/[^a-z0-9 ]/g,"").split(/\s+/).filter(Boolean).sort().join(" ")}
 const LAL="Gamaharia Lal Building";
 // Full stop sequence for a route+trip: College -> chart stops -> (Lal if needed) -> College
@@ -1538,7 +1736,7 @@ function routeStops(route){
   return stops;
 }
 function chartTime(stop){ if(stop.request) return stop.est; return toMin(stop.t[state.trip]); }
-function delayOf(routeId){return state.delays[routeId+"|"+state.trip]||0}
+function delayOf(routeId){ const v=OPS.delays[dbRouteId(routeId)]; return typeof v==="number"?v:0; }
 function liveTime(route,stop){const ct=chartTime(stop); if(ct===null)return null; return ct+delayOf(route.id)}
 function allStopsUnique(){
   const seen=new Map();
@@ -1554,13 +1752,13 @@ function routesServing(stopName){
 }
 // Every bus (route) serving a stop in the current trip, with live arrival
 function busesAtStop(stopName){
-  const k=canon(stopName), now=simMin(), out=[];
+  const k=canon(stopName), now=nowMin(), out=[];
   DATA.routes.forEach(r=>{
     const stops=routeStops(r);
     const s=stops.find(x=>canon(x.n)===k);
     if(!s) return;
     const lt=liveTime(r,s); if(lt===null) return;
-    out.push({route:r, stop:s, live:lt, chart:chartTime(s), eta:Math.round(lt-now), passed:lt<now, busNo:state.allot[r.id], delay:delayOf(r.id), request:!!s.request});
+    out.push({route:r, stop:s, live:lt, chart:chartTime(s), eta:Math.round(lt-now), passed:lt<now, busNo:busLabelFor(r,state.trip), delay:delayOf(r.id), request:!!s.request});
   });
   return out.sort((a,b)=>a.live-b.live);
 }
@@ -1569,8 +1767,10 @@ function shortStopName(n){ return n==="Gamaharia Campus"?"College":n.replace(/^G
 // times (chart + admin delay) as every ETA on the page. "Crossed X" just
 // after passing a stop, "Between X and Y" mid-segment.
 function whereNow(entry){
-  const route=entry.route, now=simMin();
+  const route=entry.route, now=nowMin();
   if(entry.passed) return "Already passed";
+  const gpsW=gpsFor(route);
+  if(gpsW) return "Live GPS — near "+nearestStopName(gpsW.lat,gpsW.lon,routeStops(route));
   const stops=routeStops(route);
   const timed=stops.map(s=>({n:s.n,lt:liveTime(route,s)})).filter(x=>x.lt!==null);
   if(!timed.length) return "No timed service this trip";
@@ -1637,7 +1837,7 @@ function interceptFor(entry,my,now){
 }
 function computeIntercept(){
   const my=myStopCoords(); if(!my) return null;
-  const now=simMin();
+  const now=nowMin();
   const passedBuses=busesAtStop(state.stopName).filter(b=>b.passed);
   if(!passedBuses.length) return null;
   const candidates=[passedBuses[0]];
@@ -1685,8 +1885,17 @@ function pointAlongPath(path,f){
   const last=path[path.length-1]; return {lat:last[0],lon:last[1]};
 }
 function busPosition(route){
-  // Interpolate along pinned stops by simulated time (College -> stops -> College)
-  const stops=routeStops(route), now=simMin(), d=delayOf(route.id);
+  // Interpolate along pinned stops by real time (College -> stops -> College)
+  const stops=routeStops(route), now=nowMin(), d=delayOf(route.id);
+  const gps=gpsFor(route);
+  if(gps){
+    // GPS wins while this trip is running: a fresh position from the
+    // driver's phone is the bus's real place, not an interpolation.
+    const gpsTimed=stops.map(function(s){ return chartTime(s); }).filter(function(x){ return x!==null; });
+    if(gpsTimed.length&&now>=Math.min.apply(null,gpsTimed)-30&&now<=Math.max.apply(null,gpsTimed)+30){
+      return {lat:gps.lat, lon:gps.lon, status:"Live GPS — near "+nearestStopName(gps.lat,gps.lon,stops)+" • updated "+fmtClockISO(gps.updated_at)};
+    }
+  }
   const firstT=chartTime(stops[0]);
   // Timed waypoints: the bus leaves College 20 min before the 1st stop's
   // chart time, then reaches each stop at its chart time (+ admin delay).
@@ -1780,7 +1989,7 @@ function selectedStopPassed(route,stops){
   const sel=list.find(s=>canon(s.n)===canon(state.stopName));
   if(!sel) return false;
   const lt=liveTime(route,sel);
-  return lt!==null&&lt<=simMin();
+  return lt!==null&&lt<=nowMin();
 }
 // Like splitLine, but when the bus's position lies on (or within a
 // couple of pixels of) more than one segment — the route retraces the
@@ -2021,9 +2230,10 @@ function makeBase(holder,onImgErr){
 // first show, and when the locate (◎) button clears fitKey.
 const S={map:null,holder:{map:null},base:null,halo:null,done:null,tail:null,todo:null,itc:null,stopLayer:null,stopsKey:"",pinMarkers:[],selBus:null,selBusHtml:"",others:{},yourPin:null,fitKey:"",sizeW:0,sizeH:0,wasHidden:false};
 function selBusIcon(html){ return L.divIcon({className:"lf-div",html:html,iconSize:[92,88],iconAnchor:[46,84]}); }
-function selBusHtml(routeId){ return '<div class="busmark-lf"><span class="busnum-chip">'+esc(state.allot[routeId])+'</span><span class="busbadge"><span class="buspulse"></span>'+BUS_SVG_23+'</span><span class="busdot"></span></div>'; }
+function selBusHtml(routeId){ return '<div class="busmark-lf"><span class="busnum-chip">'+esc(chipFor(routeId))+'</span><span class="busbadge"><span class="buspulse"></span>'+BUS_SVG_23+'</span><span class="busdot"></span></div>'; }
 function otherBusIcon(b){
-  const html='<div class="busmark2'+(b.passed?" passed":"")+'"><span class="bm-num">'+esc(b.busNo+" · "+b.route.id.replace(/^Route /,"R"))+'</span><span class="bm-ic">'+BUS_SVG_16+'</span><span class="bm-dot"></span></div>';
+  const short=b.route.id.replace(/^Route /,"R"); const lbl=b.busNo?(b.busNo+" · "+short):short;
+  const html='<div class="busmark2'+(b.passed?" passed":"")+'"><span class="bm-num">'+esc(lbl)+'</span><span class="bm-ic">'+BUS_SVG_16+'</span><span class="bm-dot"></span></div>';
   return {html:html,icon:L.divIcon({className:"lf-div",html:html,iconSize:[80,62],iconAnchor:[40,58]})};
 }
 function initStudentMap(){
@@ -2073,7 +2283,7 @@ function syncStudentMap(route,stops,pinned,linePts,pos){
   const cw=el.clientWidth, ch=el.clientHeight;
   if(!cw||!ch) S.wasHidden=true;
   else if(S.wasHidden||cw!==S.sizeW||ch!==S.sizeH){ S.sizeW=cw; S.sizeH=ch; S.wasHidden=false; S.map.invalidateSize(); }
-  const now=simMin();
+  const now=nowMin();
   // Route line: white halo, then the three-state split from lineParts —
   // light grey travelled, black only while the bus is still coming to
   // the selected stop, darker muted grey for the road the bus still has
@@ -2085,7 +2295,7 @@ function syncStudentMap(route,stops,pinned,linePts,pos){
   S.tail.setLatLngs(sp.tail||[]);
   S.todo.setLatLngs(sp.todo||[]);
   // Live positions of every OTHER bus serving the selected stop — same
-  // busesAtStop/busPosition/simulated clock as everything else.
+  // busesAtStop/busPosition/real clock as everything else.
   const others=[];
   busesAtStop(state.stopName).forEach(b=>{
     if(b.route.id===route.id) return;
@@ -2144,7 +2354,7 @@ function syncStudentMap(route,stops,pinned,linePts,pos){
       S.selBus.setLatLng([pos.lat,pos.lon]);
       if(html!==S.selBusHtml){ S.selBus.setIcon(selBusIcon(html)); S.selBusHtml=html; }
     }
-    const elm=S.selBus.getElement(); if(elm) elm.title=state.allot[route.id]+" • "+route.id+" — "+pos.status;
+    const elm=S.selBus.getElement(); if(elm) elm.title=(busLabelFor(route,state.trip)||route.id)+" • "+route.id+" — "+pos.status;
   } else if(S.selBus){ S.map.removeLayer(S.selBus); S.selBus=null; S.selBusHtml=""; }
   // Every other bus serving your stop, same marker family (smaller,
   // white; grey once passed). Exact live lat/lon — never offset.
@@ -2267,7 +2477,7 @@ function drawSchematic(route,stops,pinned,linePts,pos){
   const BUSGLYPH="M4 16c0 .88.39 1.67 1 2.22V20a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-1h8v1a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-1.78c.61-.55 1-1.34 1-2.22V6c0-3.5-3.58-4-8-4s-8 .5-8 4v10zm3.5 1A1.5 1.5 0 1 1 9 15.5 1.5 1.5 0 0 1 7.5 17zm9 0a1.5 1.5 0 1 1 1.5-1.5 1.5 1.5 0 0 1-1.5 1.5zM18 11H6V6h12v5z";
   // Same marker family as the street map: number chip on top, bus icon
   // badge below, dot on the exact position.
-  if(pos){ const px=X(pos.lon), py=Y(pos.lat); h+='<g><rect x="'+(px-37)+'" y="'+(py-58)+'" width="74" height="19" rx="9.5" fill="#0b0b0c" stroke="#ffffff" stroke-width="1.5"/><text x="'+px+'" y="'+(py-44.5)+'" font-size="11.5" font-weight="800" fill="#ffffff" text-anchor="middle">'+esc(state.allot[route.id])+'</text><circle cx="'+px+'" cy="'+(py-22)+'" r="15" fill="#0b0b0c" stroke="#ffffff" stroke-width="2"/><g transform="translate('+(px-8)+','+(py-30)+') scale(0.667)"><path fill="#ffffff" d="'+BUSGLYPH+'"/></g><circle cx="'+px+'" cy="'+py+'" r="3" fill="#0b0b0c" stroke="#ffffff" stroke-width="1.5"/></g>'; }
+  if(pos){ const px=X(pos.lon), py=Y(pos.lat); h+='<g><rect x="'+(px-37)+'" y="'+(py-58)+'" width="74" height="19" rx="9.5" fill="#0b0b0c" stroke="#ffffff" stroke-width="1.5"/><text x="'+px+'" y="'+(py-44.5)+'" font-size="11.5" font-weight="800" fill="#ffffff" text-anchor="middle">'+esc(chipFor(route.id))+'</text><circle cx="'+px+'" cy="'+(py-22)+'" r="15" fill="#0b0b0c" stroke="#ffffff" stroke-width="2"/><g transform="translate('+(px-8)+','+(py-30)+') scale(0.667)"><path fill="#ffffff" d="'+BUSGLYPH+'"/></g><circle cx="'+px+'" cy="'+py+'" r="3" fill="#0b0b0c" stroke="#ffffff" stroke-width="1.5"/></g>'; }
   busesAtStop(state.stopName).forEach(b=>{ if(b.route.id===route.id) return; const p=busPosition(b.route); if(!p) return; const lbl=b.busNo+" · "+b.route.id.replace(/^Route /,"R"); const px=X(p.lon), py=Y(p.lat); h+='<g opacity="'+(b.passed?"0.55":"1")+'"><rect x="'+(px-35)+'" y="'+(py-50)+'" width="70" height="16" rx="8" fill="'+(b.passed?"#83838a":"#0b0b0c")+'" stroke="#ffffff" stroke-width="1.2"/><text x="'+px+'" y="'+(py-38.5)+'" font-size="9.5" font-weight="800" fill="#ffffff" text-anchor="middle">'+esc(lbl)+'</text><circle cx="'+px+'" cy="'+(py-19)+'" r="12" fill="#ffffff" stroke="'+(b.passed?"#b9b9be":"#0b0b0c")+'" stroke-width="1.8"/><g transform="translate('+(px-6.5)+','+(py-25.5)+') scale(0.54)"><path fill="'+(b.passed?"#83838a":"#0b0b0c")+'" d="'+BUSGLYPH+'"/></g><circle cx="'+px+'" cy="'+py+'" r="2.6" fill="'+(b.passed?"#83838a":"#0b0b0c")+'" stroke="#ffffff" stroke-width="1.2"/></g>'; });
   $("svgmap").innerHTML=h;
 }
@@ -2303,20 +2513,20 @@ function renderStudent(){
   const coming=buses.filter(b=>!b.passed), passed=buses.filter(b=>b.passed);
   const next=coming[0];
   $("mapTitle").textContent=route.id+" — live map • "+TRIPS[state.trip];
-  $("mapSub").textContent="College → "+route.stops[0].n+" (1st stop) → … → Gamharia Campus • Bus today: "+state.allot[route.id]+(state.fixed[route.id]?" (fixed allotment)":" (today's allotment, rotates daily)");
+  $("mapSub").textContent="College → "+route.stops[0].n+" (1st stop) → … → Gamharia Campus"+(busLabelFor(route,state.trip)?" • Bus today: "+busLabelFor(route,state.trip):" • No bus allotted today — times are chart times");
   drawMap(route);
   // Headline plain sentence — ALWAYS the SELECTED route at the selected stop
   const sel=forRoute[0];
   if(sel && !sel.passed){
-    $("sentence").innerHTML="<b>"+sel.route.id+" bus</b> ("+sel.busNo+" today) will arrive at <b>"+state.stopName+"</b> stop at <b>"+fmt(sel.live)+"</b> — in about "+sel.eta+" min."+(sel.request?' <span style="font-size:13px;opacity:.85">This is a live estimate, not a chart time: '+state.stopName+' is a request stop on '+sel.route.id+' with no printed chart time — the bus stops here if you are waiting.</span>':"")+(sel.delay?' <span style="font-size:13px;opacity:.85">Includes a +'+sel.delay+' min delay set by the transport admin.</span>':"");
+    $("sentence").innerHTML="<b>"+sel.route.id+" bus</b>"+(sel.busNo?" ("+sel.busNo+" today)":"")+" will arrive at <b>"+state.stopName+"</b> stop at <b>"+fmt(sel.live)+"</b> — in about "+sel.eta+" min."+(sel.request?' <span style="font-size:13px;opacity:.85">This is a live estimate, not a chart time: '+state.stopName+' is a request stop on '+sel.route.id+' with no printed chart time — the bus stops here if you are waiting.</span>':"")+(sel.delay?' <span style="font-size:13px;opacity:.85">Includes a +'+sel.delay+' min delay set by the transport admin.</span>':"");
   } else if(sel && sel.passed){
-    $("sentence").innerHTML="<b>"+sel.route.id+" bus</b> ("+sel.busNo+" today) has already passed <b>"+state.stopName+"</b> stop — it passed at <b>"+fmt(sel.live)+"</b>."+(sel.request?' <span style="font-size:13px;opacity:.85">That time was a live estimate, not a chart time: this is a request stop on '+sel.route.id+' with no printed chart time.</span>':"")+(sel.delay?' <span style="font-size:13px;opacity:.85">Includes a +'+sel.delay+' min delay set by the transport admin.</span>':"");
+    $("sentence").innerHTML="<b>"+sel.route.id+" bus</b>"+(sel.busNo?" ("+sel.busNo+" today)":"")+" has already passed <b>"+state.stopName+"</b> stop — it passed at <b>"+fmt(sel.live)+"</b>."+(sel.request?' <span style="font-size:13px;opacity:.85">That time was a live estimate, not a chart time: this is a request stop on '+sel.route.id+' with no printed chart time.</span>':"")+(sel.delay?' <span style="font-size:13px;opacity:.85">Includes a +'+sel.delay+' min delay set by the transport admin.</span>':"");
   } else {
-    $("sentence").innerHTML="<b>"+route.id+" bus</b> ("+state.allot[route.id]+" today) does not have a timed arrival at <b>"+state.stopName+"</b> stop in the "+TRIPS[state.trip]+" trip.";
+    $("sentence").innerHTML="<b>"+route.id+" bus</b>"+(busLabelFor(route,state.trip)?" ("+busLabelFor(route,state.trip)+" today)":"")+" does not have a timed arrival at <b>"+state.stopName+"</b> stop in the "+TRIPS[state.trip]+" trip.";
   }
   // Uber-style status line under the headline: ETA · last crossed stop · on-time
   // status — all read from the same shared state as everything else.
-  const nowS=simMin();
+  const nowS=nowMin();
   let crossed=null;
   routeStops(route).forEach(s=>{const lt=liveTime(route,s); if(lt!==null&&lt<=nowS) crossed=s;});
   const statusTxt=autoStatus(route).text.replace("Running on time","On time").replace("Not started — bus is at College","Not started yet").replace("Trip complete — bus is back at College","Trip complete");
@@ -2330,10 +2540,10 @@ function renderStudent(){
   const earliest=next||(buses.length?buses[buses.length-1]:null);
   $("routeHeadLabel").textContent=route.id+" — the route shown on the map";
   if(earliest&&!earliest.passed){
-    $("earliestMain").innerHTML="<b>"+esc(earliest.busNo)+"</b> · "+earliest.route.id+" — arrives <b>"+fmt(earliest.live)+"</b> · <span class=\"mins\">"+Math.max(1,earliest.eta)+" min away</span>";
+    $("earliestMain").innerHTML=(earliest.busNo?"<b>"+esc(earliest.busNo)+"</b> · ":"")+earliest.route.id+" — arrives <b>"+fmt(earliest.live)+"</b> · <span class=\"mins\">"+Math.max(1,earliest.eta)+" min away</span>";
     $("earliestSub").textContent="Right now: "+whereNow(earliest)+(earliest.request?" • Request stop on that route — live estimate, no printed chart time":"")+(earliest.delay?" • Includes +"+earliest.delay+" min admin delay":"");
   } else if(earliest){
-    $("earliestMain").innerHTML="<b>"+esc(earliest.busNo)+"</b> · "+earliest.route.id+" — last bus, passed at <b>"+fmt(earliest.live)+"</b>";
+    $("earliestMain").innerHTML=(earliest.busNo?"<b>"+esc(earliest.busNo)+"</b> · ":"")+earliest.route.id+" — last bus, passed at <b>"+fmt(earliest.live)+"</b>";
     $("earliestSub").textContent="Already passed — no more buses are coming to this stop in the "+TRIPS[state.trip]+" trip.";
   } else {
     $("earliestMain").textContent="No bus serves this stop in the "+TRIPS[state.trip]+" trip";
@@ -2345,7 +2555,7 @@ function renderStudent(){
   const icpt=computeIntercept(), iBox=$("interceptBox");
   if(icpt&&iBox){
     iBox.style.display="block";
-    $("interceptMain").innerHTML="Catch <b>"+esc(icpt.bus.busNo)+"</b> ("+icpt.bus.route.id+") at <b>"+esc(icpt.stop.n)+"</b> — bus reaches there at <b>"+fmt(icpt.lt)+"</b>";
+    $("interceptMain").innerHTML="Catch "+(icpt.bus.busNo?"<b>"+esc(icpt.bus.busNo)+"</b> ":"")+"("+icpt.bus.route.id+") at <b>"+esc(icpt.stop.n)+"</b> — bus reaches there at <b>"+fmt(icpt.lt)+"</b>";
     $("interceptSub").textContent=icpt.distKm.toFixed(1)+" km from "+state.stopName+" • You have about "+Math.max(0,Math.round(icpt.minsLeft))+" min before the bus gets there (about "+Math.max(1,Math.round(icpt.travelMin))+" min by auto at ~20 km/h)";
     const v=$("interceptVerdict");
     if(icpt.verdict==="make"){ v.className="intercept-verdict"; v.textContent="You can make it if you leave now"; }
@@ -2369,14 +2579,14 @@ function renderStudent(){
   $("chipLast").textContent=buses.length?(coming.length?"Not passed":"Passed"):"—";
   $("expComingLbl").textContent="Still coming ("+coming.length+")";
   $("expPassedLbl").textContent="Already passed ("+passed.length+")";
-  const item=b=>`<div class="rowitem"><span><b>${b.route.id} bus</b> <span class="sub">(${b.busNo} today)</span>${b.request?' <span class="badge b-amber">Request stop</span>':""}${b.delay?' <span class="badge b-red">+'+b.delay+' min delay</span>':""}<br><span class="sub">${b.passed?"Passed at ":"Arrives "}${fmt(b.live)}${b.chart!==null&&!b.request?" • chart "+fmt(b.chart):""}</span></span><span class="badge ${b.passed?"b-grey":"b-green"}">${b.passed?"Passed":b.eta+" min"}</span></div>`;
+  const item=b=>`<div class="rowitem"><span><b>${b.route.id} bus</b> ${b.busNo?`<span class="sub">(${b.busNo} today)</span>`:""}${b.request?' <span class="badge b-amber">Request stop</span>':""}${b.delay?' <span class="badge b-red">+'+b.delay+' min delay</span>':""}<br><span class="sub">${b.passed?"Passed at ":"Arrives "}${fmt(b.live)}${b.chart!==null&&!b.request?" • chart "+fmt(b.chart):""}</span></span><span class="badge ${b.passed?"b-grey":"b-green"}">${b.passed?"Passed":b.eta+" min"}</span></div>`;
   $("comingList").innerHTML=coming.length?coming.map(item).join(""):'<p class="sub">No buses still coming in this trip.</p>';
   $("passedList").innerHTML=passed.length?passed.map(item).join(""):'<p class="sub">No bus has passed this stop yet in this trip.</p>';
   $("allAtStop").innerHTML=buses.length?buses.map(item).join(""):'<p class="sub">No buses for this stop in this trip.</p>';
-  $("allotMini").innerHTML=DATA.routes.map(r=>`<div class="rowitem"><span><b>${r.id}</b> <span class="sub">1st stop: ${r.stops[0].n}</span></span><span class="badge ${state.fixed[r.id]?"b-teal":"b-grey"}">${state.allot[r.id]}${state.fixed[r.id]?" • fixed":""}</span></div>`).join("");
+  $("allotMini").innerHTML=DATA.routes.map(r=>`<div class="rowitem"><span><b>${r.id}</b> <span class="sub">1st stop: ${r.stops[0].n}</span></span><span class="badge b-grey">${busLabelFor(r,state.trip)||"Not allotted today"}</span></div>`).join("");
   // Timetable for selected route
-  const stops=routeStops(route), now=simMin();
-  $("ttTitle").textContent=route.id+" timetable — "+TRIPS[state.trip]+" • "+state.allot[route.id]+" today";
+  const stops=routeStops(route), now=nowMin();
+  $("ttTitle").textContent=route.id+" timetable — "+TRIPS[state.trip]+(busLabelFor(route,state.trip)?" • "+busLabelFor(route,state.trip)+" today":"");
   $("expTTLbl").textContent="Timetable — "+route.id+" · "+TRIPS[state.trip];
   let rows=[`<div class="ttrow"><span><b>Gamaharia Campus</b> <span class="badge b-teal">Trip begins</span></span><span class="sub">Bus leaves College for the 1st stop</span></div>`];
   stops.forEach((s,i)=>{
@@ -2387,7 +2597,7 @@ function renderStudent(){
   $("ttList").innerHTML=rows.join("");
 }
 function routeStatus(route){
-  const stops=routeStops(route), now=simMin();
+  const stops=routeStops(route), now=nowMin();
   const times=stops.map(s=>liveTime(route,s)).filter(t=>t!==null);
   if(!times.length) return ["No service this trip","b-grey",0,0];
   const passedN=times.filter(t=>t<now).length;
@@ -2395,14 +2605,14 @@ function routeStatus(route){
   if(passedN>=times.length) return ["Completed","b-grey",passedN,0];
   return ["En route","b-green",passedN,times.length-passedN];
 }
-// On-time status, computed automatically from the bus's live simulated
+// On-time status, computed automatically from the bus's live
 // position vs the chart — no driver input. The bus's position sits on the
 // segment between two stops (by live times); taking the same fraction along
 // that segment's CHART times gives where the chart says the bus should be
-// "in schedule-minutes" right now, and the gap to the simulated clock is
+// "in schedule-minutes" right now, and the gap to the real clock is
 // how far behind (or ahead) schedule it is running.
 function autoStatus(route){
-  const stops=routeStops(route), now=simMin();
+  const stops=routeStops(route), now=nowMin();
   const timed=stops.map(s=>({chart:chartTime(s),live:liveTime(route,s)})).filter(x=>x.live!==null);
   if(!timed.length) return {text:"No timed service in this trip",cls:"b-grey"};
   if(now<timed[0].live) return {text:"Not started — bus is at College",cls:"b-grey"};
@@ -2446,7 +2656,7 @@ function drawDriverMap(route,nextName){
   const stops=routeStops(route);
   const pinned=stops.filter(s=>s.lat!==null&&s.lon!==null);
   const linePts=routeLine(route);
-  const pos=busPosition(route), now=simMin();
+  const pos=busPosition(route), now=nowMin();
   const cw=el.clientWidth, ch=el.clientHeight;
   if(!cw||!ch){ D.wasHidden=true; return; }
   if(D.wasHidden||cw!==D.sizeW||ch!==D.sizeH){ D.sizeW=cw; D.sizeH=ch; D.wasHidden=false; D.map.invalidateSize(); }
@@ -2506,9 +2716,9 @@ function zoomDriver(dir){
 
 function renderDriver(){
   const route=DATA.routes.find(r=>r.id===state.routeId);
-  const now=simMin();
+  const now=nowMin();
   const stops=routeStops(route);
-  // A stop counts as reached purely from the shared simulated clock: its
+  // A stop counts as reached purely from the shared real clock: its
   // live time (chart + any admin-set delay) has arrived. Same rule the
   // student view uses for "passed", so both views always agree.
   const rows=stops.map((s,i)=>({s:s,i:i,ct:chartTime(s),lt:liveTime(route,s)}));
@@ -2516,8 +2726,8 @@ function renderDriver(){
   const doneN=rows.filter(isDone).length;
   const nextX=rows.find(x=>!isDone(x));
   const status=autoStatus(route);
-  $("drvBigBus").textContent=state.allot[route.id]+" • "+route.id;
-  $("drvRouteLine").textContent=TRIPS[state.trip]+" trip • "+(state.fixed[route.id]?"Fixed allotment":"Today's allotment — rotates daily")+" • Fully automatic — no taps needed while driving";
+  $("drvBigBus").textContent=busLabelFor(route,state.trip)?(busLabelFor(route,state.trip)+" • "+route.id):route.id;
+  $("drvRouteLine").textContent=TRIPS[state.trip]+" trip • "+(busLabelFor(route,state.trip)||"No bus allotted today")+" • Fully automatic — no taps needed while driving";
   const badge=$("drvStatusBadge"); badge.textContent=status.text; badge.className="badge "+status.cls; badge.style.fontSize="14px"; badge.style.padding="8px 14px";
   $("drvClock").textContent=fmt(now);
   if(nextX){
@@ -2536,12 +2746,13 @@ function renderDriver(){
     const st=isDone(x)?'<span class="badge b-teal">Reached ✓</span>':(nextX&&x.i===nextX.i)?'<span class="badge b-amber">Next stop</span>':'<span class="badge b-green">Upcoming</span>';
     return `<div class="stoprow"><div class="sdot ${isDone(x)?"passed":""} ${x.s.lat===null?"nopin":""}"></div><div style="flex:1"><b>${x.s.n}</b> ${x.i===0?'<span class="badge b-teal">1st stop</span>':""} ${x.s.request?'<span class="badge b-amber">Request stop</span>':""}<div class="sub">Chart ${x.s.request?"— (no printed time)":(x.s.t[state.trip]||"—")} • Expected ${x.lt===null?"—":fmt(x.lt)}</div></div>${st}</div>`;
   }).join("");
+  renderDuty();
   drawDriverMap(route,nextX?nextX.s.n:null);
 }
 // Admin's live fleet map: the same Leaflet treatment as the student and
 // driver maps (makeBase — same basemap, mirror/offline failover, layers
 // control), but showing the WHOLE fleet: every route's bus at its live
-// busPosition() on the shared simulated clock, in the same marker family
+// busPosition() on the shared real clock, in the same marker family
 // as the student map's other buses (otherBusIcon — black bus-number/route
 // chip, white bus icon, round 7x7 anchor dot). Faint route lines give the
 // fleet context. Ticks only move markers; the view is fitted to the whole
@@ -2559,7 +2770,8 @@ function initAdminMap(){
   A.lineLayer=L.layerGroup().addTo(A.map);
 }
 function admBusPopup(r,pos){
-  return "<b>"+esc(state.allot[r.id])+" — "+esc(r.id)+"</b><br>"+esc(pos.status)+"<br>1st stop: "+esc(r.stops[0].n)+(delayOf(r.id)?"<br>Delayed +"+delayOf(r.id)+" min (admin override)":"");
+  const bl=busLabelFor(r,state.trip);
+  return "<b>"+esc(bl?bl+" — "+r.id:r.id)+"</b><br>"+esc(pos.status)+"<br>1st stop: "+esc(r.stops[0].n)+(bl?"":"<br>Not allotted today")+(delayOf(r.id)?"<br>Delayed +"+delayOf(r.id)+" min (admin override)":"");
 }
 function drawAdminMap(){
   const el=$("admMap"); if(!el) return;
@@ -2586,7 +2798,7 @@ function drawAdminMap(){
     const pos=busPosition(r); if(!pos) return;
     seen[r.id]=true; pts.push([pos.lat,pos.lon]);
     const done=/^Completed/.test(pos.status||""); if(!done) live++;
-    const ic=otherBusIcon({busNo:state.allot[r.id],route:r,passed:done});
+    const ic=otherBusIcon({busNo:busLabelFor(r,state.trip),route:r,passed:done});
     const ex=A.markers[r.id];
     if(!ex){
       const m=L.marker([pos.lat,pos.lon],{icon:ic.icon}).addTo(A.map);
@@ -2597,11 +2809,11 @@ function drawAdminMap(){
       if(ex.html!==ic.html){ ex.m.setIcon(ic.icon); ex.html=ic.html; }
       if(ex.m.setPopupContent) ex.m.setPopupContent(admBusPopup(r,pos));
     }
-    const elm=A.markers[r.id].m.getElement(); if(elm) elm.title=state.allot[r.id]+" • "+r.id+" — "+pos.status;
+    const elm=A.markers[r.id].m.getElement(); if(elm) elm.title=(busLabelFor(r,state.trip)||r.id)+" • "+r.id+" — "+pos.status;
   });
   Object.keys(A.markers).forEach(k=>{ if(!seen[k]){ A.map.removeLayer(A.markers[k].m); delete A.markers[k]; } });
   const note=$("admMapNote");
-  if(note) note.textContent=DATA.routes.length+" buses on the map • "+live+" on the road • "+TRIPS[state.trip]+" trip • positions as of "+fmt(simMin())+".";
+  if(note) note.textContent=DATA.routes.length+" buses on the map • "+live+" on the road • "+TRIPS[state.trip]+" trip • positions as of "+fmt(nowMin())+".";
   const fKey=String(state.trip);
   if(A.fitKey!==fKey&&pts.length>1){
     A.fitKey=fKey;
@@ -2610,6 +2822,147 @@ function drawAdminMap(){
     A.map.fitBounds(L.latLngBounds(pts),{padding:cw<=640?[18,18]:[28,28],maxZoom:15,animate:false});
   }
 }
+
+// ---------- Driver duty (GPS source) + Admin fleet/allotment editors ----------
+let DUTY={on:false, busId:null, watchId:null, lastSent:0, lastPos:null, lastHist:0, lastSentAt:null};
+function dutyBusOptions(){
+  const todayTrips={};
+  Object.keys(OPS.allotByTrip).forEach(function(tid){ todayTrips[OPS.allotByTrip[tid].bus_id]=tid; });
+  return OPS.buses.slice().sort(function(a,b){ const aa=todayTrips[a.id]?0:1, bb=todayTrips[b.id]?0:1; if(aa!==bb) return aa-bb; return String(a.number).localeCompare(String(b.number), undefined, {numeric:true}); });
+}
+function allotmentTripForBus(busId){
+  const now=nowMin(); let best=null;
+  DATA.routes.forEach(function(r){
+    [0,1,2].forEach(function(k){
+      const a=allotFor(r,k); if(!a||!a.bus||a.bus.id!==busId) return;
+      const times=r.stops.map(function(s){ return s.t[k]==null?null:toMin(s.t[k]); }).filter(function(x){ return x!==null; });
+      if(!times.length) return;
+      const lo=Math.min.apply(null,times)-30, hi=Math.max.apply(null,times)+30;
+      const score=(now>=lo&&now<=hi)?0:1;
+      if(!best||score<best.score) best={route:r, kind:k, score:score};
+    });
+  });
+  return best;
+}
+function renderDuty(){
+  const sel=$("drvBusSel"), btn=$("drvDutyBtn"), badge=$("drvDutyBadge"), note=$("drvDutyNote");
+  if(!sel||!btn) return;
+  const buses=dutyBusOptions();
+  const prev=sel.value;
+  if(!buses.length){ sel.innerHTML='<option value="">No buses yet — ask Admin to add buses</option>'; }
+  else{
+    sel.innerHTML=buses.map(function(b){
+      let lbl="Bus "+busNumText(b.number);
+      const at=allotmentTripForBus(b.id);
+      if(at) lbl+=" — "+at.route.id+" · "+TRIPS[at.kind];
+      if(!b.active) lbl+=" (inactive)";
+      return '<option value="'+b.id+'">'+esc(lbl)+'</option>';
+    }).join("");
+  }
+  if(prev&&buses.some(function(b){ return b.id===prev; })) sel.value=prev;
+  else if(DUTY.busId&&buses.some(function(b){ return b.id===DUTY.busId; })) sel.value=DUTY.busId;
+  sel.disabled=DUTY.on||!buses.length;
+  btn.disabled=!buses.length;
+  btn.textContent=DUTY.on?"End duty":"Start duty";
+  if(badge){ badge.textContent=DUTY.on?"On duty — sharing location":"Off duty"; badge.className="badge "+(DUTY.on?"b-green":"b-grey"); badge.style.fontSize="14px"; badge.style.padding="8px 14px"; }
+  if(note){ note.textContent=DUTY.on?("Sharing live location for the bus you picked — students see it moving on their maps. Location is shared only while on duty."+(DUTY.lastSentAt?(" Last sent "+fmtClockISO(DUTY.lastSentAt)+"."):"")):"Off duty — your location is not shared."; }
+}
+function onDutyError(err){
+  const el=$("drvDutyErr");
+  let msg="Couldn't get your location — duty could not start. Check that Location is on for your device and allowed for this site, then try again.";
+  if(err&&err.code===1) msg="Location permission was denied, so duty could not start. Allow Location for this site in your browser settings, then tap Start duty again.";
+  else if(err&&err.code===3) msg="Location timed out — try Start duty again with a clearer signal.";
+  if(el) el.textContent=msg;
+  endDuty(true);
+}
+async function sendDutyPosition(pos){
+  const c=pos.coords;
+  const nowMs=Date.now();
+  const moved=DUTY.lastPos?havKm(DUTY.lastPos.lat,DUTY.lastPos.lon,c.latitude,c.longitude)*1000:Infinity;
+  if(nowMs-DUTY.lastSent<10000&&moved<25) return;
+  DUTY.lastSent=nowMs; DUTY.lastPos={lat:c.latitude, lon:c.longitude};
+  try{
+    await upsertLocation(DUTY.busId, c.latitude, c.longitude, (c.speed==null?null:Math.round(c.speed*3.6*10)/10), (c.heading==null?null:c.heading));
+    DUTY.lastSentAt=new Date().toISOString();
+    if(nowMs-DUTY.lastHist>=30000){ DUTY.lastHist=nowMs; try{ await insertHistory(DUTY.busId, c.latitude, c.longitude); }catch(e){} }
+    const el=$("drvDutyErr"); if(el) el.textContent="";
+    renderDuty(); loadOps();
+  }catch(e){
+    const el=$("drvDutyErr"); if(el) el.textContent="Couldn't send your position: "+sbFriendly(e)+" Duty stays on — check your account is a driver account.";
+  }
+}
+function onDutyPosition(pos){ if(!DUTY.on) return; sendDutyPosition(pos); }
+function startDuty(){
+  const sel=$("drvBusSel"); const err=$("drvDutyErr");
+  const busId=sel?sel.value:"";
+  if(!busId){ if(err) err.textContent="Pick the bus you are driving first."; return; }
+  if(!("geolocation" in navigator)){ if(err) err.textContent="Location isn't available in this browser — duty can't start."; return; }
+  if(err) err.textContent="";
+  DUTY.on=true; DUTY.busId=busId; DUTY.lastSent=0; DUTY.lastPos=null; DUTY.lastHist=0;
+  const at=allotmentTripForBus(busId);
+  if(at){ state.routeId=at.route.id; state.trip=at.kind; }
+  renderDuty(); renderAll();
+  try{ DUTY.watchId=navigator.geolocation.watchPosition(onDutyPosition, onDutyError, {enableHighAccuracy:true, timeout:20000, maximumAge:5000}); }
+  catch(e){ onDutyError(null); }
+}
+function endDuty(silent){
+  if(DUTY.watchId!=null&&"geolocation" in navigator){ try{ navigator.geolocation.clearWatch(DUTY.watchId); }catch(e){} }
+  const wasOn=DUTY.on;
+  DUTY.on=false; DUTY.busId=null; DUTY.watchId=null;
+  if(wasOn&&!silent){ const el=$("drvDutyErr"); if(el) el.textContent="Duty ended — location sharing stopped."; }
+  renderDuty();
+}
+async function addBusFromForm(){
+  const inp=$("admBusNum"), note=$("admBusNote"), btn=$("admBusAdd");
+  if(!inp) return;
+  const num=busNumText(inp.value);
+  if(!num){ if(note) note.textContent="Enter a bus number first."; return; }
+  btn.disabled=true;
+  try{ await addBus(num); inp.value=""; if(note) note.textContent="Bus "+num+" added."; }
+  catch(e){ if(note) note.textContent="Couldn't add the bus: "+sbFriendly(e); }
+  finally{ btn.disabled=false; renderAll(); }
+}
+function renderFleetManager(){
+  const host=$("admBusList"); if(!host) return;
+  const note=$("admBusNote");
+  if(!OPS.buses.length){ host.innerHTML='<p class="sub">No buses yet. Add the first bus number below.</p>'; return; }
+  host.innerHTML=OPS.buses.map(function(b){
+    const at=allotmentTripForBus(b.id);
+    return '<div class="rowitem"><span><b>Bus '+esc(busNumText(b.number))+'</b> <span class="sub">'+(at?(at.route.id+" · "+TRIPS[at.kind]+" today"):"Not allotted today")+'</span></span><span style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end"><span class="badge '+(b.active?"b-green":"b-grey")+'">'+(b.active?"Active":"Inactive")+'</span><button class="btn-ghost" type="button" data-bus-act="'+b.id+'">'+(b.active?"Deactivate":"Activate")+'</button><button class="btn-ghost" type="button" data-bus-del="'+b.id+'">Remove</button></span></div>';
+  }).join("");
+  host.querySelectorAll("[data-bus-act]").forEach(function(btn){ btn.addEventListener("click", async function(){ btn.disabled=true; try{ const b=OPS.buses.filter(function(x){ return x.id===btn.dataset.busAct; })[0]; await setBusActive(b.id, !b.active); }catch(e){ if(note) note.textContent="Couldn't change the bus: "+sbFriendly(e); } finally{ btn.disabled=false; renderAll(); } }); });
+  host.querySelectorAll("[data-bus-del]").forEach(function(btn){ btn.addEventListener("click", async function(){
+    if(!btn.dataset.armed){ btn.dataset.armed="1"; btn.textContent="Tap again to remove"; setTimeout(function(){ btn.dataset.armed=""; btn.textContent="Remove"; },4000); return; }
+    btn.disabled=true;
+    try{ await removeBus(btn.dataset.busDel); if(note) note.textContent="Bus removed."; }
+    catch(e){ if(note) note.textContent="Couldn't remove the bus: "+sbFriendly(e); }
+    finally{ renderAll(); }
+  }); });
+}
+function renderAllotmentEditor(){
+  const host=$("admAllot"); if(!host) return;
+  const head=$("admAllotTrip"); if(head) head.textContent=TRIPS[state.trip];
+  const note=$("admAllotNote");
+  host.innerHTML=DATA.routes.map(function(r){
+    const tid=tripIdFor(r,state.trip);
+    const cur=OPS.allotByTrip[tid];
+    const opts=['<option value="">No bus</option>'].concat(OPS.buses.filter(function(b){ return b.active||(cur&&cur.bus_id===b.id); }).map(function(b){ return '<option value="'+b.id+'"'+(cur&&cur.bus_id===b.id?" selected":"")+'>Bus '+esc(busNumText(b.number))+'</option>'; }).join("")).join("");
+    return '<div class="rowitem"><span><b>'+esc(r.id)+'</b> <span class="sub">1st stop: '+esc(r.stops[0].n)+'</span></span><select class="admsel" data-trip="'+tid+'" aria-label="Bus for '+esc(r.id)+' in the '+TRIPS[state.trip]+' trip">'+opts+'</select></div>';
+  }).join("");
+  host.querySelectorAll("select").forEach(function(sel){
+    sel.addEventListener("change", async function(){
+      const tid=sel.dataset.trip, busId=sel.value||null;
+      sel.disabled=true;
+      try{ await setAllotment(tid, busId); if(note) note.textContent="Saved — students and drivers see the new allotment."; }
+      catch(e){ if(note) note.textContent="Couldn't save: "+sbFriendly(e)+" Only an admin account can change allotments."; }
+      finally{ sel.disabled=false; renderAll(); }
+    });
+  });
+}
+(function(){
+  const db=$("drvDutyBtn"); if(db) db.addEventListener("click", function(){ if(DUTY.on) endDuty(false); else startDuty(); });
+  const ab=$("admBusAdd"); if(ab) ab.addEventListener("click", addBusFromForm);
+})();
 function renderAdmin(){
   $("admTripName").textContent=TRIPS[state.trip]+" trip";
   const mt=$("admMapTrip"); if(mt) mt.textContent=TRIPS[state.trip]+" trip";
@@ -2617,16 +2970,16 @@ function renderAdmin(){
   drawAdminMap();
   $("admFleet").innerHTML=DATA.routes.map(r=>{
     const[label,cls,p,c]=routeStatus(r);
-    return `<div class="rowitem"><span><b>${r.id}</b> <span class="sub">• ${state.allot[r.id]} today • 1st stop ${r.stops[0].n}</span></span><span style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end"><span class="badge b-grey">${p} stops passed</span><span class="badge b-grey">${c} to go</span><span class="badge ${cls}">${label}</span>${delayOf(r.id)?'<span class="badge b-red">+'+delayOf(r.id)+' min</span>':""}</span></div>`;
+    const bl=busLabelFor(r,state.trip);
+    return `<div class="rowitem"><span><b>${r.id}</b> <span class="sub">• ${bl?bl+" today":"Not allotted today"} • 1st stop ${r.stops[0].n}</span></span><span style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end"><span class="badge b-grey">${p} stops passed</span><span class="badge b-grey">${c} to go</span><span class="badge ${cls}">${label}</span>${delayOf(r.id)?'<span class="badge b-red">+'+delayOf(r.id)+' min</span>':""}</span></div>`;
   }).join("");
-  $("admAllot").innerHTML=DATA.routes.map(r=>`<div class="rowitem"><span><b>${r.id}</b> <span class="sub">${state.fixed[r.id]?"Fixed allotment":"Rotates daily"}</span></span><input class="busnum" data-route="${r.id}" value="${state.allot[r.id]}" aria-label="Bus number for ${r.id}"></div>`).join("");
-  document.querySelectorAll("#admAllot input").forEach(inp=>inp.addEventListener("change",e=>{state.allot[e.target.dataset.route]=e.target.value.trim()||state.allot[e.target.dataset.route]; renderAll();}));
+  renderFleetManager();
+  renderAllotmentEditor();
   // Delay override lives here in Admin only — drivers never set it.
   const dr=state.admDelayRoute||state.routeId;
-  $("admDelayTrip").textContent=TRIPS[state.trip];
-  $("admDelayRoute").innerHTML=DATA.routes.map(r=>`<option value="${r.id}" ${r.id===dr?"selected":""}>${r.id} — ${state.allot[r.id]} today</option>`).join("");
+  $("admDelayRoute").innerHTML=DATA.routes.map(r=>`<option value="${r.id}" ${r.id===dr?"selected":""}>${r.id} — ${busLabelFor(r,state.trip)||"not allotted"}</option>`).join("");
   document.querySelectorAll("#admDelayBtns .btn-ghost").forEach(b=>b.classList.toggle("on",+b.dataset.delay===delayOf(dr)));
-  $("admDelayNote").textContent=delayOf(dr)?("A +"+delayOf(dr)+" min delay is set for "+dr+" ("+TRIPS[state.trip]+") — student ETAs include it, and the driver's automatic status reflects it."):"No delay set for "+dr+" in the "+TRIPS[state.trip]+" trip.";
+  $("admDelayNote").textContent=delayOf(dr)?("A +"+delayOf(dr)+" min delay is set for "+dr+" today — student ETAs include it, and the driver's automatic status reflects it."):"No delay set for "+dr+" today.";
 }
 // The stop/route/trip selectors are one shared control bar: it floats over
 // the map in the Student view and sits above the view for the Driver.
@@ -2760,7 +3113,7 @@ $("locateBtn").addEventListener("click",()=>{ S.fitKey=""; if(curDrawn) drawMap(
 $("admDelayRoute").addEventListener("change",e=>{state.admDelayRoute=e.target.value; renderAll();});
 $("drvZoomIn").addEventListener("click",()=>zoomDriver(1));
 $("drvZoomOut").addEventListener("click",()=>zoomDriver(-1));
-document.querySelectorAll("#admDelayBtns .btn-ghost").forEach(b=>b.addEventListener("click",()=>{const dr=state.admDelayRoute||state.routeId; state.delays[dr+"|"+state.trip]=+b.dataset.delay; renderAll();}));
+document.querySelectorAll("#admDelayBtns .btn-ghost").forEach(b=>b.addEventListener("click",async ()=>{const dr=state.admDelayRoute||state.routeId; const mins=+b.dataset.delay; const note=$("admDelayNote"); b.disabled=true; try{ await setDelay(dr,mins); if(note) note.textContent=mins?("Saved: +"+mins+" min delay for "+dr+" today."):"Saved: "+dr+" is on time today."; }catch(err){ if(note) note.textContent="Couldn't save the delay: "+sbFriendly(err)+" Only an admin account can set delays."; } finally{ b.disabled=false; renderAll(); } }));
 // ---- On-demand detail panels (student view) ---------------------------
 // The sheet's long lists and the full timetable are collapsed by default
 // behind expander buttons; the stops list lives in a slide-over drawer
@@ -2788,7 +3141,7 @@ function setStopsDrawer(open){
 }
 $("stopsBtn").addEventListener("click",()=>setStopsDrawer(!uiState.stops));
 $("stopsClose").addEventListener("click",()=>setStopsDrawer(false));
-function tick(){ $("clock").textContent=fmt(simMin()); }
+function tick(){ $("clock").textContent=fmt(nowMin()); }
 $("mapStops").addEventListener("click",e=>{
   const row=e.target&&e.target.closest?e.target.closest("[data-pin]"):null;
   if(!row||!S.map) return;
@@ -2798,7 +3151,7 @@ $("mapStops").addEventListener("click",e=>{
 });
 window.addEventListener("resize",()=>{ S.sizeW=0; D.sizeW=0; A.sizeW=0; if(state.role==="student"&&curDrawn) drawMap(curDrawn.route); if(state.role==="driver"&&drvLast) drawDriverMap(drvLast.route,drvLast.nextName); if(state.role==="admin") drawAdminMap(); });
 // Small read handle for automated checks of the live map state.
-window.__aju={studentMap:()=>S.map,driverMap:()=>D.map,adminMap:()=>A.map,adminBusMarkers:()=>A.markers,selBusMarker:()=>S.selBus,otherBusMarkers:()=>S.others,pinMarkers:()=>S.pinMarkers,base:()=>S.base,adminBase:()=>A.base,busPosition:busPosition,simMin:simMin,state:state,DATA:DATA,refresh:()=>{ if(curDrawn) drawMap(curDrawn.route); }};
+window.__aju={studentMap:()=>S.map,driverMap:()=>D.map,adminMap:()=>A.map,adminBusMarkers:()=>A.markers,selBusMarker:()=>S.selBus,otherBusMarkers:()=>S.others,pinMarkers:()=>S.pinMarkers,base:()=>S.base,adminBase:()=>A.base,busPosition:busPosition,nowMin:nowMin,state:state,DATA:DATA,refresh:()=>{ if(curDrawn) drawMap(curDrawn.route); }};
 // ---- Site-styled dropdowns ---------------------------------------------
 // The popup list of a native <select> is drawn by the OS — black list,
 // blue highlight, grey scrollbar — and no CSS can theme it. So each
@@ -2939,48 +3292,42 @@ function enhanceSelect(sel){
   syncLabel(); buildList();
 }
 
-// ================= Auth gate (100% client-side demo) =================
-// Accounts live in localStorage on THIS device only (key basaarah_users);
-// the signed-in email lives in basaarah_session (a special marker for the
-// preset admin). Passwords are stored only as a simple one-way hash, never
-// in plaintext. No server, no network — the page stays a single static
-// file. The gate comes first: the app stays hidden until login / signup.
+// ================= Auth gate (Supabase Auth — real accounts) =================
+// Signup/login run against the project's Supabase Auth service (plain
+// fetch, no libraries). The account's profile row (role, name, phone,
+// home stop) lives in the database's profiles table, so an account works
+// on every device. Session tokens are kept in this browser only, under
+// basaarah_sb_session, and refreshed before expiry. The gate comes
+// first: the app stays hidden until login / signup. Admin accounts are
+// ordinary accounts whose profile role is 'admin' (promoted by the
+// transport office in the database); there is no separate admin
+// password in this page.
 (function(){
-  var UKEY="basaarah_users", SKEY="basaarah_session", ADMIN_SESSION="__admin__";
-  var ADMIN_ID="admin", ADMIN_PW_HASH="v1$bp9x6x$9got11$15"; // hash of the preset demo admin password (same hashPw as accounts); the password itself is not in this file
   var authView=$("authView"), authUser=$("authUser"),
       userMenu=$("userMenu"), loginForm=$("loginForm"), signupForm=$("signupForm"),
       adminForm=$("adminForm"), gateMain=$("gateMain"), gateAdmin=$("gateAdmin");
   if(!authView||!loginForm||!signupForm) return;
   var currentUser=null, authRole="student", authTab="login";
 
-  function loadUsers(){ try{ var u=JSON.parse(localStorage.getItem(UKEY)); return Array.isArray(u)?u:[]; }catch(e){ return []; } }
-  function saveUsers(u){ try{ localStorage.setItem(UKEY, JSON.stringify(u)); }catch(e){} }
-  // Simple FNV-1a + djb2 mix hash (demo-grade obfuscation, not real security).
-  function hashPw(pw,email){
-    var s=String(email).toLowerCase()+"::"+String(pw), h1=0x811c9dc5, h2=5381;
-    for(var i=0;i<s.length;i++){ var c=s.charCodeAt(i); h1=Math.imul(h1^c,0x01000193); h2=(Math.imul(h2,33)^c)|0; }
-    return "v1$"+(h1>>>0).toString(36)+"$"+(h2>>>0).toString(36)+"$"+s.length;
+  function userRole(u){ if(!u) return "student"; return u.role==="driver"?"driver":(u.role==="admin"?"admin":"student"); }
+  function profileToUser(profile, email, id){
+    var stopName=profile.home_stop?(STOP_NAMES[profile.home_stop]||""):"";
+    return {id:id, email:email, name:profile.full_name||"", role:profile.role, phone:profile.phone||"", stop:stopName, stopSlug:profile.home_stop||null};
   }
-  function findUser(email){ email=String(email||"").trim().toLowerCase(); return loadUsers().filter(function(u){return u.email===email;})[0]||null; }
-  function getSession(){ try{ return localStorage.getItem(SKEY)||""; }catch(e){ return ""; } }
-  function setSession(v){ try{ if(v) localStorage.setItem(SKEY,v); else localStorage.removeItem(SKEY); }catch(e){} }
-  // Accounts made before roles existed have no role field: they are Students.
-  function userRole(u){ if(!u) return "student"; if(u.admin||u.role==="admin") return "admin"; return u.role==="driver"?"driver":"student"; }
-
   // Preselect the user's home stop (Student view) — called only on load /
   // login / signup, never on the 5s tick, so a stop the user then picks
   // manually is never overridden.
   function applyHomeStop(user){
-    if(!user||!user.stop) return;
+    if(!user) return;
+    var name=user.stop||(user.stopSlug?STOP_NAMES[user.stopSlug]:"")||"";
+    if(!name) return;
     var names=allStopsUnique();
-    var match=names.filter(function(n){ return canon(n)===canon(user.stop); })[0];
+    var match=names.filter(function(n){ return canon(n)===canon(name); })[0];
     if(!match) return;
     state.stopName=match;
     var serving=routesServing(match);
     if(serving.length && !serving.some(function(r){ return r.id===state.routeId; })) state.routeId=serving[0].id;
   }
-
   // Land inside the app on the signed-in role's own view. There is no
   // in-app view switcher: the session role alone decides the view, and
   // switching roles means logging out and back in through the gate.
@@ -2989,7 +3336,6 @@ function enhanceSelect(sel){
     document.querySelectorAll(".view").forEach(function(v){ v.classList.remove("active"); });
     var view=$("view-"+role); if(view) view.classList.add("active");
   }
-
   function renderAuthHeader(){
     if(currentUser){
       authUser.hidden=false;
@@ -2997,7 +3343,7 @@ function enhanceSelect(sel){
       var first=r==="admin" ? "Admin" : (currentUser.name||"?").trim().split(/\s+/)[0];
       $("userName").textContent=first;
       $("userAvatar").textContent=first.charAt(0).toUpperCase()||"?";
-      $("userMenuStop").textContent = r==="admin" ? "Admin access" : r==="driver" ? "Driver account" : "Home stop: "+(currentUser.stop||"—");
+      $("userMenuStop").textContent = r==="admin" ? "Admin access" : r==="driver" ? "Driver account" : (currentUser.stop?("Home stop: "+currentUser.stop):"Student account");
     }else{
       authUser.hidden=true; userMenu.hidden=true;
       $("userChip").setAttribute("aria-expanded","false");
@@ -3071,17 +3417,20 @@ function enhanceSelect(sel){
       dismissWelcome(160);
     });
   }
-  function signIn(user){
-    currentUser=user; setSession(userRole(user)==="admin" ? ADMIN_SESSION : user.email);
+  function signIn(user, showSplash){
+    currentUser=user;
     var r=userRole(user);
     if(r==="student") applyHomeStop(user);
     setRoleView(r);
     renderAuthHeader(); hideGate(); renderAll();
-    showWelcome(user);
+    if(showSplash!==false) showWelcome(user);
     if(r==="student") setTimeout(function(){ if(curDrawn) drawMap(curDrawn.route); },60);
   }
-  function signOut(){
-    currentUser=null; setSession(""); renderAuthHeader(); showGate();
+  async function signOut(){
+    try{ if(typeof endDuty==="function") endDuty(true); }catch(e){}
+    if(sbSession&&sbSession.access_token){ try{ await sbAuth("logout", {}, true); }catch(e){} }
+    sbSession=null; sbSaveStored();
+    currentUser=null; renderAuthHeader(); showGate();
   }
 
   function updateHeadings(){
@@ -3123,19 +3472,31 @@ function enhanceSelect(sel){
     if(!form) return;
     form.querySelectorAll(".ferr").forEach(function(e){ e.textContent=""; e.hidden=true; });
     form.querySelectorAll("[aria-invalid]").forEach(function(i){ i.removeAttribute("aria-invalid"); });
-    var g=form.querySelector(".auth-err"); if(g){ g.textContent=""; g.hidden=true; }
+    var g=form.querySelector(".auth-err"); if(g){ g.textContent=""; g.hidden=true; g.classList.remove("ok"); }
   }
-  function formErr(form,msg){ var g=form.querySelector(".auth-err"); if(g){ g.textContent=msg; g.hidden=false; } }
+  function formErr(form,msg){ var g=form.querySelector(".auth-err"); if(g){ g.textContent=msg; g.hidden=false; g.classList.remove("ok"); } }
+  function formOk(form,msg){ var g=form.querySelector(".auth-err"); if(g){ g.textContent=msg; g.hidden=false; g.classList.add("ok"); } }
+  function busyBtn(btn, busy, label){
+    if(!btn) return;
+    if(busy){ if(!btn.dataset.orig) btn.dataset.orig=btn.textContent; btn.disabled=true; btn.textContent=label||"Please wait…"; }
+    else{ btn.disabled=false; if(btn.dataset.orig){ btn.textContent=btn.dataset.orig; delete btn.dataset.orig; } }
+  }
   var EMAIL_RE=/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
   // Populate the signup stop list from the site's own stop list and give it
-  // the site's custom dropdown treatment.
-  (function(){
+  // the site's custom dropdown treatment. Refreshed when the database
+  // chart loads, so the list always matches the live chart.
+  function populateGateStops(){
     var sel=$("suStop"); if(!sel) return;
+    var prev=sel.value;
     sel.innerHTML=allStopsUnique().map(function(n){ return '<option value="'+n.replace(/"/g,"&quot;")+'">'+n+"</option>"; }).join("");
-    sel.value=LAL;
-    if(typeof enhanceSelect==="function") enhanceSelect(sel);
-  })();
+    var names=allStopsUnique();
+    if(prev&&names.indexOf(prev)>=0) sel.value=prev; else sel.value=LAL;
+    if(typeof enhanceSelect==="function"&&!sel.dataset.cselDone) enhanceSelect(sel);
+  }
+  populateGateStops();
+  refreshGateStops=function(){ populateGateStops(); };
+  onChartLoaded=function(){ if(currentUser&&userRole(currentUser)==="student") applyHomeStop(currentUser); renderAuthHeader(); renderAll(); };
 
   $("roleCardStudent").addEventListener("click",function(){ setAuthRole("student"); });
   $("roleCardDriver").addEventListener("click",function(){ setAuthRole("driver"); });
@@ -3193,7 +3554,7 @@ function enhanceSelect(sel){
   });
   $("logoutBtn").addEventListener("click",function(){ signOut(); });
 
-  signupForm.addEventListener("submit",function(e){
+  signupForm.addEventListener("submit",async function(e){
     e.preventDefault(); clearErr(signupForm);
     var driver=authRole==="driver";
     var name=$("suName").value.trim(), email=$("suEmail").value.trim().toLowerCase(),
@@ -3214,19 +3575,40 @@ function enhanceSelect(sel){
     else if(pw&&pw2!==pw){ fieldErr("suPw2","Passwords don't match."); bad=true; }
     if(!driver && !stop){ fieldErr("suStop","Please pick your stop."); bad=true; }
     if(bad) return;
-    if(findUser(email)){
-      fieldErr("suEmail","An account with this email already exists.");
-      formErr(signupForm,"This email is already registered — try logging in instead.");
-      return;
+    var submit=signupForm.querySelector('button[type="submit"]');
+    busyBtn(submit, true, "Creating account…");
+    try{
+      const res=await sbAuth("signup",{email:email, password:pw});
+      let authData=null;
+      if(res&&res.session&&res.session.access_token) authData=res.session;
+      else if(res&&res.access_token) authData=res;
+      if(!authData){
+        // No session: the project requires email confirmation. The
+        // account exists; the user confirms via email, then logs in.
+        busyBtn(submit, false);
+        $("liEmail").value=email; $("suPw").value=""; $("suPw2").value="";
+        formOk(signupForm,"Account created — check your email for the confirmation link, then log in with the same email and password.");
+        return;
+      }
+      sbSetSession(authData, null);
+      const prof={role: driver?"driver":"student", full_name:name};
+      if(driver) prof.phone=phone;
+      else { const slug=stopSlugFor(stop); if(slug) prof.home_stop=slug; }
+      let profile=null;
+      try{ await upsertProfile(authData.user.id, prof); profile=await fetchProfile(authData.user.id); }catch(pe){ profile=null; }
+      sbSession.profile=profile||prof; sbSaveStored();
+      const user=profile?profileToUser(profile, email, authData.user.id):{id:authData.user.id, email:email, name:name, role:prof.role, phone:phone||"", stop: driver?"":stop, stopSlug: prof.home_stop||null};
+      busyBtn(submit, false);
+      signIn(user, true);
+    }catch(err){
+      busyBtn(submit, false);
+      const m=sbFriendly(err);
+      if(/already exists/i.test(m)) fieldErr("suEmail","An account with this email already exists.");
+      formErr(signupForm, m);
     }
-    var user = driver
-      ? {name:name, email:email, pw:hashPw(pw,email), role:"driver", phone:phone}
-      : {name:name, email:email, pw:hashPw(pw,email), role:"student", stop:stop};
-    var users=loadUsers(); users.push(user); saveUsers(users);
-    signIn(user);
   });
 
-  loginForm.addEventListener("submit",function(e){
+  loginForm.addEventListener("submit",async function(e){
     e.preventDefault(); clearErr(loginForm);
     var email=$("liEmail").value.trim().toLowerCase(), pw=$("liPw").value;
     var bad=false;
@@ -3234,48 +3616,97 @@ function enhanceSelect(sel){
     else if(!EMAIL_RE.test(email)){ fieldErr("liEmail","That doesn't look like a valid email address."); bad=true; }
     if(!pw){ fieldErr("liPw","Please enter your password."); bad=true; }
     if(bad) return;
-    var user=findUser(email);
-    if(!user || user.pw!==hashPw(pw,email)){
-      formErr(loginForm,"Wrong email or password. Check both and try again.");
-      return;
+    var submit=loginForm.querySelector('button[type="submit"]');
+    busyBtn(submit, true, "Logging in…");
+    try{
+      const authData=await sbAuth("token?grant_type=password",{email:email, password:pw});
+      sbSetSession(authData, null);
+      let profile=null;
+      try{ profile=await fetchProfile(authData.user.id); }catch(pe){ profile=null; }
+      if(!profile){
+        // First login after email confirmation: the profile row was
+        // never created (signup returned no session). Create it now
+        // from the role picked on this gate.
+        const prof={role: authRole, full_name: email.split("@")[0]};
+        try{ await upsertProfile(authData.user.id, prof); profile=await fetchProfile(authData.user.id); }catch(pe2){ profile=prof; }
+      }
+      sbSession.profile=profile; sbSaveStored();
+      const user=profileToUser(profile, email, authData.user.id);
+      busyBtn(submit, false);
+      signIn(user, true);
+    }catch(err){
+      busyBtn(submit, false);
+      formErr(loginForm, sbFriendly(err));
     }
-    signIn(user);
   });
 
-  adminForm.addEventListener("submit",function(e){
+  adminForm.addEventListener("submit",async function(e){
     e.preventDefault(); clearErr(adminForm);
-    var id=$("admLoginId").value.trim(), pw=$("admLoginPw").value;
+    var email=$("admLoginId").value.trim().toLowerCase(), pw=$("admLoginPw").value;
     var bad=false;
-    if(!id){ fieldErr("admLoginId","Please enter the admin ID."); bad=true; }
+    if(!email){ fieldErr("admLoginId","Please enter your email."); bad=true; }
+    else if(!EMAIL_RE.test(email)){ fieldErr("admLoginId","That doesn't look like a valid email address."); bad=true; }
     if(!pw){ fieldErr("admLoginPw","Please enter the password."); bad=true; }
     if(bad) return;
-    if(id!==ADMIN_ID || hashPw(pw,ADMIN_ID)!==ADMIN_PW_HASH){
-      formErr(adminForm,"Wrong admin ID or password. Check both and try again.");
-      return;
+    var submit=adminForm.querySelector('button[type="submit"]');
+    busyBtn(submit, true, "Logging in…");
+    try{
+      const authData=await sbAuth("token?grant_type=password",{email:email, password:pw});
+      sbSetSession(authData, null);
+      let profile=null;
+      try{ profile=await fetchProfile(authData.user.id); }catch(pe){ profile=null; }
+      if(!profile||profile.role!=="admin"){
+        // Signed in, but not an admin account: end this session and
+        // stay on the admin screen with a plain explanation.
+        try{ await sbAuth("logout", {}, true); }catch(e2){}
+        sbSession=null; sbSaveStored();
+        busyBtn(submit, false);
+        formErr(adminForm,"This account is not an admin account. Admin access is given by the transport office — sign in with an admin account, or ask the office to promote yours.");
+        return;
+      }
+      sbSession.profile=profile; sbSaveStored();
+      const user=profileToUser(profile, email, authData.user.id);
+      busyBtn(submit, false);
+      signIn(user, true);
+    }catch(err){
+      busyBtn(submit, false);
+      formErr(adminForm, sbFriendly(err));
     }
-    signIn({name:"Admin", email:ADMIN_SESSION, role:"admin", admin:true});
   });
 
   // Initialise the gate UI, then restore a saved session: with one, the
   // app opens straight at that user's role view; without one, the gate
   // is the first thing shown and the app stays hidden behind it.
   setAuthRole("student"); switchTab("login");
-  var sess=getSession();
-  if(sess===ADMIN_SESSION){ currentUser={name:"Admin", email:ADMIN_SESSION, role:"admin", admin:true}; }
-  else if(sess){ var u=findUser(sess); if(u){ currentUser=u; } else setSession(""); }
-  if(currentUser){
-    if(userRole(currentUser)==="student") applyHomeStop(currentUser);
-    setRoleView(userRole(currentUser));
-    hideGate();
-  }else{
-    showGate();
+  async function restoreSession(){
+    if(!sbSession||!sbSession.access_token){ showGate(); renderAuthHeader(); return; }
+    const ok=await sbEnsureFresh();
+    if(!ok||!sbSession||!sbSession.access_token){ showGate(); renderAuthHeader(); return; }
+    let profile=sbSession.profile||null;
+    if(sbSession.user&&sbSession.user.id){
+      try{ const fresh=await fetchProfile(sbSession.user.id); if(fresh) profile=fresh; }catch(e){}
+    }
+    if(profile){
+      sbSession.profile=profile; sbSaveStored();
+      currentUser=profileToUser(profile, sbSession.user?sbSession.user.email:"", sbSession.user?sbSession.user.id:"");
+      if(userRole(currentUser)==="student") applyHomeStop(currentUser);
+      setRoleView(userRole(currentUser)); hideGate();
+    }else{
+      showGate();
+    }
+    renderAuthHeader();
   }
+  restoreSession();
   renderAuthHeader();
 })();
 
 ["stopSel","routeSel","admDelayRoute"].forEach(function(id){ enhanceSelect($(id)); });
+state.trip=initialTripFor(nowMin()); syncTripButtons();
 renderAll(); tick();
+loadChartFromDB(); loadOps();
 setInterval(()=>{tick(); renderAll();},5000);
+setInterval(loadOps,20000);
+document.addEventListener("visibilitychange", function(){ if(!document.hidden) loadOps(); });
 </script>
 </body>
 </html>
