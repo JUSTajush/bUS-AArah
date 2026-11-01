@@ -1068,9 +1068,31 @@ select.admsel{padding:10px 14px;border-radius:999px;border:1px solid var(--line)
 .belowgrid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}
 /* ---------- driver ---------- */
 #drvMap{width:100%;height:440px;display:block;border-radius:14px;border:1px solid var(--line);background:#e9e7df;z-index:0}
-.drvmapwrap{position:relative}
+.drvmapwrap{position:relative;overflow:hidden;border-radius:14px}
 #drvLocateBtn{position:absolute;right:14px;bottom:30px;z-index:30;width:48px;height:48px;border-radius:50%;border:0;background:#000;display:grid;place-items:center;cursor:pointer;box-shadow:0 6px 16px rgba(0,0,0,.35)}
 #drvLocateBtn svg{fill:#fff;display:block}
+/* Phone fit + single re-centre button (driver view): the duty box's
+   bus-select row is a flex row whose bus select (#drvBusSel, a native
+   select whose intrinsic width comes from its longest option, ~367px)
+   reports a min-content wider than a phone screen. As a grid item with the
+   default min-width:auto, the duty card therefore forced the whole
+   driver column to a fixed 421px — on a 390px (or 360px) phone every
+   card below it, the route map and its re-centre button included,
+   rendered too wide and pushed past the screen edge, so the map card
+   was clipped and the page could pan sideways (the misplaced /
+   half-clipped target button in the 2026-11-01 phone recordings).
+   Letting the driver grid items shrink to the screen — and the select
+   label ellipsis instead of stretching the row — makes the driver
+   layout fit the viewport exactly; the map and its one re-centre
+   button sit fully inside the card again. The last two rules are the
+   guarantee of exactly one button: a view's re-centre button can
+   never paint while its view is inactive, and the driver button is
+   clipped to its own map wrap (overflow:hidden above). */
+#view-driver>div>*{min-width:0}
+#view-driver .grid>*{min-width:0}
+#view-driver .dutybox .csel-inline{min-width:0;max-width:100%}
+#drvBusSel{min-width:0;max-width:100%}
+.view:not(.active) #locateBtn,.view:not(.active) #drvLocateBtn{display:none!important}
 #admMap{width:100%;height:460px;display:block;border-radius:14px;border:1px solid var(--line);background:#e9e7df;z-index:0}
 @media(max-width:900px){#admMap{height:360px}}
 .drvnext{background:#000;color:#fff;border-radius:20px;padding:22px;margin-top:14px}
@@ -1996,7 +2018,7 @@ function busPosition(route){
     // schedule interpolation below exactly as before. Only the
     // marker position changes; every schedule-derived label, ETA
     // and count elsewhere on the page is untouched.
-    return {lat:gps.lat, lon:gps.lon, status:"Live GPS — near "+nearestStopName(gps.lat,gps.lon,stops)+" • updated "+fmtClockISO(gps.updated_at)};
+    return {lat:gps.lat, lon:gps.lon, status:"Live GPS — near "+nearestStopName(gps.lat,gps.lon,stops)+" • updated "+fmtClockISO(gps.updated_at), src:"gps", updated_at:gps.updated_at};
   }
   const firstT=chartTime(stops[0]);
   // Timed waypoints: the bus leaves College 20 min before the 1st stop's
@@ -2007,7 +2029,7 @@ function busPosition(route){
   stops.forEach((s,i)=>{ const ct=chartTime(s); timed.push({n:s.n,lat:s.lat,lon:s.lon,t:ct!==null?ct+d:null,seq:i+1}); });
   const pinned=timed.filter(p=>p.lat!==null&&p.lon!==null&&p.t!==null);
   if(!pinned.length) return null;
-  if(now<=pinned[0].t) return {...pinned[0],status:"Not started — at College"};
+  if(now<=pinned[0].t) return {...pinned[0],status:"Not started — at College",src:"schedule"};
   // Coordinate sequence (College + every stop, nulls kept for indexing):
   // the road path between two timed waypoints runs through every pinned
   // stop between them, leg by leg, exactly as the drawn route line does.
@@ -2020,10 +2042,10 @@ function busPosition(route){
       const mids=coordSeq.slice(a.seq,b.seq+1).filter(p=>p.lat!==null&&p.lon!==null).map(p=>[p.lat,p.lon]);
       const path=mids.length>=2?pathFromSeq(mids):[[a.lat,a.lon],[b.lat,b.lon]];
       const pt=pointAlongPath(path,f);
-      return {lat:pt.lat,lon:pt.lon,status:"En route — reached near "+a.n+", heading to "+b.n};
+      return {lat:pt.lat,lon:pt.lon,status:"En route — reached near "+a.n+", heading to "+b.n,src:"schedule"};
     }
   }
-  return {...pinned[pinned.length-1],status:"Completed — reached College"};
+  return {...pinned[pinned.length-1],status:"Completed — reached College",src:"schedule"};
 }
 // ---- Live-GPS passed/coming determination ----
 // The marker position already obeyed fresh GPS, but every passed/coming
@@ -2147,6 +2169,91 @@ function liveProgressFor(route,stopName){
   let stopAlong=null;
   if(sel&&sel.lat!==null&&sel.lon!==null) stopAlong=vertexAlongKm(linePts,cum,sel.lat,sel.lon,canon(sel.n)===canon("Gamaharia Campus"));
   return {gps:gps, along:proj.along, offKm:proj.offKm, stopAlong:stopAlong, totalKm:cum[cum.length-1], schedAlong:schedAlong, stops:stops, linePts:linePts, cum:cum};
+}
+
+// ---- Marker glide + hold-last-good (presentation only) ---------------
+// Remote views learn a bus's position from bus_locations: the driver's
+// phone writes at most every ~10 s and each open page polls every 15 s.
+// Snapping the marker straight to each new fix made buses teleport in
+// the student and admin views. The per-bus display state below glides
+// a fresh-GPS marker along its route's baked road geometry over ~12 s
+// (never longer than the poll interval) instead of snapping; a straight
+// lat/lon lerp is the fallback when a bus has no route geometry.
+// Snaps stay instant for: first sightings, GPS <-> schedule source
+// switches, jumps over ~500 m, a changed route/trip context, and ticks
+// that land while the tab is hidden (a visibilitychange snap also
+// lands any in-flight glide on its target). A poll carrying an
+// updated_at that is not newer than the fix already applied is
+// ignored, so a marker never moves backwards. Verdicts, ETAs, counts
+// and headlines are computed from the real resolved positions exactly
+// as before — this layer only decides where a marker is DRAWN.
+const GLIDE_MS=12000;
+const glideStates={};
+function pointAtAlong(path,cum,alongKm){
+  if(!path||path.length<2) return null;
+  const total=cum[cum.length-1], a=Math.max(0,Math.min(total,alongKm));
+  for(let i=0;i<path.length-1;i++){
+    if(a<=cum[i+1]||i===path.length-2){
+      const seg=cum[i+1]-cum[i], f=seg>0?Math.min(1,Math.max(0,(a-cum[i])/seg)):0;
+      return {lat:path[i][0]+(path[i+1][0]-path[i][0])*f, lon:path[i][1]+(path[i+1][1]-path[i][1])*f};
+    }
+  }
+  const last=path[path.length-1]; return {lat:last[0],lon:last[1]};
+}
+function glideSample(st){
+  const an=st.anim; if(!an) return {lat:st.lat,lon:st.lon,along:st.along};
+  const f=an.dur>0?Math.min(1,(performance.now()-an.start)/an.dur):1;
+  if(an.path&&an.cum&&an.fromAlong!==null&&an.fromAlong!==undefined&&an.toAlong!==null&&an.toAlong!==undefined){
+    const a=an.fromAlong+(an.toAlong-an.fromAlong)*f, p=pointAtAlong(an.path,an.cum,a);
+    if(p) return {lat:p.lat,lon:p.lon,along:a};
+  }
+  return {lat:an.fromLat+(an.toLat-an.fromLat)*f, lon:an.fromLon+(an.toLon-an.fromLon)*f, along:an.toAlong};
+}
+function glideSnap(st,lat,lon,along){
+  if(st.raf){ cancelAnimationFrame(st.raf); st.raf=null; }
+  st.anim=null; st.lat=lat; st.lon=lon; st.along=along;
+  if(st.marker) st.marker.setLatLng([lat,lon]);
+}
+function glideDrive(key,marker,target,ctx){
+  let st=glideStates[key];
+  if(!st){
+    glideStates[key]=st={marker:marker,lat:target.lat,lon:target.lon,along:(ctx.along===undefined?null:ctx.along),source:ctx.source,updatedAt:ctx.updatedAt||null,pathKey:ctx.pathKey||"",anim:null,raf:null};
+    marker.setLatLng([target.lat,target.lon]);
+    return;
+  }
+  st.marker=marker;
+  // Out-of-order guard: a GPS fix that is not newer than the one
+  // already applied never moves the marker backwards.
+  if(ctx.source==="gps"&&ctx.updatedAt&&st.updatedAt&&ctx.updatedAt<=st.updatedAt) return;
+  const disp=glideSample(st);
+  const jumpKm=havKm(disp.lat,disp.lon,target.lat,target.lon);
+  const snap=ctx.source!=="gps"||st.source!=="gps"||(ctx.pathKey||"")!==st.pathKey||jumpKm>0.5||(typeof document!=="undefined"&&document.hidden);
+  st.source=ctx.source; st.updatedAt=ctx.updatedAt||null; st.pathKey=ctx.pathKey||"";
+  if(snap){ glideSnap(st,target.lat,target.lon,(ctx.along===undefined?null:ctx.along)); return; }
+  st.anim={fromLat:disp.lat,fromLon:disp.lon,fromAlong:disp.along,toLat:target.lat,toLon:target.lon,toAlong:(ctx.along===undefined?null:ctx.along),path:ctx.path||null,cum:ctx.cum||null,start:performance.now(),dur:GLIDE_MS};
+  if(!st.raf){
+    const step=function(){
+      st.raf=null;
+      if(!st.anim) return;
+      const s=glideSample(st);
+      st.lat=s.lat; st.lon=s.lon; st.along=s.along;
+      if(st.marker) st.marker.setLatLng([s.lat,s.lon]);
+      if(performance.now()-st.anim.start>=st.anim.dur){ const an=st.anim; st.anim=null; st.lat=an.toLat; st.lon=an.toLon; st.along=an.toAlong; if(st.marker) st.marker.setLatLng([st.lat,st.lon]); return; }
+      st.raf=requestAnimationFrame(step);
+    };
+    st.raf=requestAnimationFrame(step);
+  }
+}
+function glideForget(key){
+  const st=glideStates[key]; if(!st) return;
+  if(st.raf) cancelAnimationFrame(st.raf);
+  delete glideStates[key];
+}
+if(typeof document!=="undefined"&&document.addEventListener){
+  document.addEventListener("visibilitychange",function(){
+    if(document.hidden) return;
+    Object.keys(glideStates).forEach(function(k){ const st=glideStates[k]; if(st&&st.anim) glideSnap(st,st.anim.toLat,st.anim.toLon,st.anim.toAlong); });
+  });
 }
 
 // Real street map, powered by Leaflet 1.9.4 (bundled with this page above —
@@ -2585,12 +2692,16 @@ function syncStudentMap(route,stops,pinned,linePts,pos){
     if(!S.selBus){
       S.selBus=L.marker([pos.lat,pos.lon],{icon:selBusIcon(html),zIndexOffset:1000}).addTo(S.map);
       S.selBusHtml=html;
-    } else {
-      S.selBus.setLatLng([pos.lat,pos.lon]);
-      if(html!==S.selBusHtml){ S.selBus.setIcon(selBusIcon(html)); S.selBusHtml=html; }
-    }
+    } else if(html!==S.selBusHtml){ S.selBus.setIcon(selBusIcon(html)); S.selBusHtml=html; }
+    const isGps=pos.src==="gps", gpsS=isGps?gpsFor(route):null, cumS=cumDistKm(linePts);
+    let alongS=null;
+    { const pr=projectAlongPath(linePts,cumS,pos.lat,pos.lon,isGps?scheduleAlongKm(route,stops,linePts,cumS,now):null,gpsS?gpsS.heading:null); if(pr) alongS=pr.along; }
+    glideDrive("S:sel",S.selBus,{lat:pos.lat,lon:pos.lon},{source:isGps?"gps":"schedule",updatedAt:isGps?pos.updated_at:null,path:linePts,cum:cumS,along:alongS,pathKey:route.id+"|"+state.trip});
     const elm=S.selBus.getElement(); if(elm) elm.title=(busLabelFor(route,state.trip)||route.id)+" • "+route.id+" — "+pos.status;
-  } else if(S.selBus){ S.map.removeLayer(S.selBus); S.selBus=null; S.selBusHtml=""; }
+  } else {
+    if(S.selBus){ S.map.removeLayer(S.selBus); S.selBus=null; S.selBusHtml=""; }
+    glideForget("S:sel");
+  }
   // Every other bus serving your stop, same marker family (smaller,
   // white; grey once passed). Exact live lat/lon — never offset.
   const seen={};
@@ -2600,13 +2711,14 @@ function syncStudentMap(route,stops,pinned,linePts,pos){
     if(!ex){
       const m=L.marker([o.p.lat,o.p.lon],{icon:ic.icon}).addTo(S.map);
       S.others[o.b.route.id]={m:m,html:ic.html};
-    } else {
-      ex.m.setLatLng([o.p.lat,o.p.lon]);
-      if(ex.html!==ic.html){ ex.m.setIcon(ic.icon); ex.html=ic.html; }
-    }
+    } else if(ex.html!==ic.html){ ex.m.setIcon(ic.icon); ex.html=ic.html; }
+    const oIsGps=o.p.src==="gps", oLine=routeLine(o.b.route), oCum=cumDistKm(oLine), oGps=oIsGps?gpsFor(o.b.route):null;
+    let oAlong=null;
+    { const pr=projectAlongPath(oLine,oCum,o.p.lat,o.p.lon,oIsGps?scheduleAlongKm(o.b.route,routeStops(o.b.route),oLine,oCum,now):null,oGps?oGps.heading:null); if(pr) oAlong=pr.along; }
+    glideDrive("S:"+o.b.route.id,S.others[o.b.route.id].m,{lat:o.p.lat,lon:o.p.lon},{source:oIsGps?"gps":"schedule",updatedAt:oIsGps?o.p.updated_at:null,path:oLine,cum:oCum,along:oAlong,pathKey:o.b.route.id+"|"+state.trip});
     const elm=S.others[o.b.route.id].m.getElement(); if(elm) elm.title=o.b.busNo+" • "+o.b.route.id+" — "+o.p.status;
   });
-  Object.keys(S.others).forEach(k=>{ if(!seen[k]){ S.map.removeLayer(S.others[k].m); delete S.others[k]; } });
+  Object.keys(S.others).forEach(k=>{ if(!seen[k]){ S.map.removeLayer(S.others[k].m); delete S.others[k]; glideForget("S:"+k); } });
   // Missed-bus intercept: dashed guide line only, shown exactly when the
   // intercept card is shown (same computeIntercept()). The catch stop keeps
   // its normal stop pin/label — no extra marker or label is drawn for it.
@@ -2872,7 +2984,7 @@ function autoStatus(route){
 // the route when route/trip changes; ticks only move markers. The zoom
 // buttons under the map zoom in/out around the bus's live position.
 let drvLast=null;
-const D={map:null,holder:{map:null},base:null,halo:null,done:null,todo:null,stopLayer:null,stopsKey:"",bus:null,busHtml:"",fitKey:"",sizeW:0,sizeH:0,wasHidden:true};
+const D={map:null,holder:{map:null},base:null,halo:null,done:null,todo:null,stopLayer:null,stopsKey:"",bus:null,busHtml:"",fitKey:"",sizeW:0,sizeH:0,wasHidden:true,lastGpsPos:null,lastGpsStatus:""};
 function initDriverMap(){
   const el=$("drvMap"); if(!el||typeof L==="undefined"||D.map) return;
   D.map=L.map("drvMap",{zoomControl:false});
@@ -2900,14 +3012,14 @@ function driverBusPosition(route){
     const lp=DUTY.lastPos;
     if(lp&&lp.lat!=null&&lp.lon!=null){
       const stops=routeStops(route);
-      return {lat:lp.lat, lon:lp.lon, status:"Live GPS — near "+nearestStopName(lp.lat,lp.lon,stops)+" • your phone's position"};
+      return {lat:lp.lat, lon:lp.lon, status:"Live GPS — near "+nearestStopName(lp.lat,lp.lon,stops)+" • your phone's position", src:"device"};
     }
     const loc=OPS.locations[DUTY.busId];
     if(loc&&loc.lat!=null&&loc.lng!=null){
       const age=(Date.now()-new Date(loc.updated_at).getTime())/1000;
       if(age>=0&&age<=180){
         const stops=routeStops(route);
-        return {lat:loc.lat, lon:loc.lng, status:"Live GPS — near "+nearestStopName(loc.lat,loc.lng,stops)+" • updated "+fmtClockISO(loc.updated_at)};
+        return {lat:loc.lat, lon:loc.lng, status:"Live GPS — near "+nearestStopName(loc.lat,loc.lng,stops)+" • updated "+fmtClockISO(loc.updated_at), src:"db", updated_at:loc.updated_at};
       }
     }
   }
@@ -2930,7 +3042,18 @@ function drawDriverMap(route,nextName){
   const stops=routeStops(route);
   const pinned=stops.filter(s=>s.lat!==null&&s.lon!==null);
   const linePts=routeLine(route);
-  const pos=driverBusPosition(route), now=nowMin();
+  const resolvedPos=driverBusPosition(route), now=nowMin();
+  // Hold-last-good (driver view): while on duty, a single update cycle
+  // that resolves no GPS position — a missed watch fix, a database row
+  // a moment too old — must not erase the bus marker or repaint the
+  // route line unsplit (the vanishing-marker glitch). The last
+  // GPS-sourced position is held for marker and line until a fresher
+  // one lands, inside the usual 180 s freshness window. Off duty, or
+  // before any GPS position exists, the resolved position is used
+  // exactly as before.
+  if(resolvedPos&&(resolvedPos.src==="device"||resolvedPos.src==="db"||resolvedPos.src==="gps")){ D.lastGpsPos={lat:resolvedPos.lat,lon:resolvedPos.lon,at:Date.now()}; D.lastGpsStatus=resolvedPos.status; }
+  let pos=resolvedPos;
+  if(DUTY.on&&D.lastGpsPos&&(!resolvedPos||resolvedPos.src==="schedule")&&Date.now()-D.lastGpsPos.at<=180000) pos={lat:D.lastGpsPos.lat,lon:D.lastGpsPos.lon,status:D.lastGpsStatus||(resolvedPos?resolvedPos.status:"")};
   const cw=el.clientWidth, ch=el.clientHeight;
   if(!cw||!ch){ D.wasHidden=true; return; }
   if(D.wasHidden||cw!==D.sizeW||ch!==D.sizeH){ D.sizeW=cw; D.sizeH=ch; D.wasHidden=false; D.map.invalidateSize(); }
@@ -3146,13 +3269,17 @@ function drawAdminMap(){
         m.bindPopup(popHtml);
         A.markers[key]={m:m,html:ic.html};
       }else{
-        ex.m.setLatLng([res.lat,res.lon]);
         if(ex.html!==ic.html){ ex.m.setIcon(ic.icon); ex.html=ic.html; }
         if(ex.m.setPopupContent) ex.m.setPopupContent(popHtml);
       }
+      { const aIsGps=res.source==="gps", aLine=al?routeLine(al.route):null, aCum=aLine?cumDistKm(aLine):null, aLoc=aIsGps?OPS.locations[selBus.id]:null;
+        let aAlong=null;
+        if(aLine){ const pr=projectAlongPath(aLine,aCum,res.lat,res.lon,aIsGps?scheduleAlongKm(al.route,routeStops(al.route),aLine,aCum,nowMin()):null,aLoc?aLoc.heading:null); if(pr) aAlong=pr.along; }
+        glideDrive("A:"+key,A.markers[key].m,{lat:res.lat,lon:res.lon},{source:aIsGps?"gps":"schedule",updatedAt:aIsGps?res.updated_at:null,path:aLine,cum:aCum,along:aAlong,pathKey:key+"|"+state.trip});
+      }
       const elm=A.markers[key].m.getElement(); if(elm) elm.title="Bus "+busNumText(selBus.number)+" — "+admBusStatusLine(selBus,res);
     }
-    Object.keys(A.markers).forEach(k=>{ if(!seenSel[k]){ A.map.removeLayer(A.markers[k].m); delete A.markers[k]; } });
+    Object.keys(A.markers).forEach(k=>{ if(!seenSel[k]){ A.map.removeLayer(A.markers[k].m); delete A.markers[k]; glideForget("A:"+k); } });
     if(statusEl){ statusEl.hidden=false; statusEl.textContent=admBusStatusLine(selBus,res); }
     const note1=$("admMapNote");
     if(note1) note1.textContent="Showing Bus "+busNumText(selBus.number)+" only • "+TRIPS[state.trip]+" trip • positions as of "+fmt(nowMin())+".";
@@ -3177,13 +3304,17 @@ function drawAdminMap(){
       m.bindPopup(admBusPopup(r,pos));
       A.markers[r.id]={m:m,html:ic.html};
     } else {
-      ex.m.setLatLng([pos.lat,pos.lon]);
       if(ex.html!==ic.html){ ex.m.setIcon(ic.icon); ex.html=ic.html; }
       if(ex.m.setPopupContent) ex.m.setPopupContent(admBusPopup(r,pos));
     }
+    { const fIsGps=pos.src==="gps", fLine=routeLine(r), fCum=cumDistKm(fLine), fGps=fIsGps?gpsFor(r):null;
+      let fAlong=null;
+      const pr=projectAlongPath(fLine,fCum,pos.lat,pos.lon,fIsGps?scheduleAlongKm(r,routeStops(r),fLine,fCum,nowMin()):null,fGps?fGps.heading:null); if(pr) fAlong=pr.along;
+      glideDrive("A:"+r.id,A.markers[r.id].m,{lat:pos.lat,lon:pos.lon},{source:fIsGps?"gps":"schedule",updatedAt:fIsGps?pos.updated_at:null,path:fLine,cum:fCum,along:fAlong,pathKey:r.id+"|"+state.trip});
+    }
     const elm=A.markers[r.id].m.getElement(); if(elm) elm.title=(busLabelFor(r,state.trip)||r.id)+" • "+r.id+" — "+pos.status;
   });
-  Object.keys(A.markers).forEach(k=>{ if(!seen[k]){ A.map.removeLayer(A.markers[k].m); delete A.markers[k]; } });
+  Object.keys(A.markers).forEach(k=>{ if(!seen[k]){ A.map.removeLayer(A.markers[k].m); delete A.markers[k]; glideForget("A:"+k); } });
   const note=$("admMapNote");
   if(note) note.textContent=DATA.routes.length+" buses on the map • "+live+" on the road • "+TRIPS[state.trip]+" trip • positions as of "+fmt(nowMin())+".";
   const fKey=String(state.trip);
