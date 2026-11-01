@@ -1833,30 +1833,6 @@ function routeStops(route){
 function chartTime(stop){ if(stop.request) return stop.est; if(stop.campusEst) return stop.est; return toMin(stop.t[state.trip]); }
 function delayOf(routeId){ const v=OPS.delays[dbRouteId(routeId)]; return typeof v==="number"?v:0; }
 function liveTime(route,stop){const ct=chartTime(stop); if(ct===null)return null; return ct+delayOf(route.id)}
-// Fresh-GPS override grace window (student predictions only): a fresh
-// GPS fix may override the schedule only until the trip's chart
-// campus-arrival time + that trip's admin delay + PRED_GRACE_MIN
-// minutes. Past that, the trip is complete on every student surface
-// regardless of how fresh the duty phone's GPS still is. With no fresh
-// GPS the schedule alone decides exactly as before, so the window
-// never delays or alters schedule-only completion. `trip` is the
-// route serving the currently selected trip kind (state.trip).
-const PRED_GRACE_MIN = 60;
-function gpsOverrideOpen(trip, now){
-  const t=(now===undefined||now===null)?nowMin():now;
-  const route=trip&&trip.route?trip.route:trip;
-  if(!route||!route.stops) return true;
-  const stops=routeStops(route);
-  const campusStops=stops.filter(function(s){ return canon(s.n)===canon("Gamaharia Campus"); });
-  const campus=campusStops.length?campusStops[campusStops.length-1]:null;
-  let end=campus?liveTime(route,campus):null;
-  if(end===null){
-    const times=stops.map(function(s){ return liveTime(route,s); }).filter(function(x){ return x!==null; });
-    end=times.length?Math.max.apply(null,times):null;
-  }
-  if(end===null) return true;
-  return t<=end+PRED_GRACE_MIN;
-}
 function allStopsUnique(){
   const seen=new Map();
   DATA.routes.forEach(r=>routeStops(r).forEach(s=>{const k=canon(s.n); if(!seen.has(k)) seen.set(k,s.n)}));
@@ -2181,20 +2157,14 @@ function scheduleAlongKm(route,stops,linePts,cum,now){
   return cum[cum.length-1];
 }
 // Fresh-GPS progress for a route, or null when there is no fresh fix /
-// no usable geometry, or when the GPS-override grace window has closed
-// (gpsOverrideOpen): past chart end + delay + 60 min a fresh fix must
-// not revive a completed trip as "coming" on any student surface.
+// no usable geometry. A fresh fix decides passed/coming in ALL trip
+// states, with no chart-end cutoff: with no fresh fix, callers fall
+// back to the schedule verdict.
 // stopAlong is the selected stop's along-route
 // distance (null when the stop has no confirmed coordinates on this
 // route, in which case callers fall back to the schedule verdict).
 function liveProgressFor(route,stopName){
   const now=nowMin();
-  // Single decision point for the cap: returning null here makes
-  // busesAtStop, the missed-bus intercept and the student line all
-  // fall back to the schedule verdict consistently. busPosition() is
-  // untouched, so the drawn marker may still follow fresh GPS, and
-  // Admin/Driver views never call this path.
-  if(!gpsOverrideOpen(route,now)) return null;
   const gps=gpsFor(route); if(!gps) return null;
   const stops=routeStops(route);
   const linePts=routeLine(route);
@@ -2915,9 +2885,26 @@ function renderStudent(){
   const nowS=nowMin();
   let crossed=null;
   routeStops(route).forEach(s=>{const lt=liveTime(route,s); if(lt!==null&&lt<=nowS) crossed=s;});
-  const statusTxt=autoStatus(route).text.replace("Running on time","On time").replace("Not started — bus is at College","Not started yet").replace("Trip complete — bus is back at College","Trip complete");
+  let statusTxt=autoStatus(route).text.replace("Running on time","On time").replace("Not started — bus is at College","Not started yet").replace("Trip complete — bus is back at College","Trip complete");
   const etaPart=(sel&&!sel.passed)?'<span class="mins">'+sel.eta+' min away</span>':(sel?("Passed at "+fmt(sel.live)):"No timed bus this trip");
-  const crossedPart=!crossed?"On the way from College":(crossed.n==="Gamaharia Campus"?"Reached Gamaharia Campus":("Crossed "+esc(crossed.n.replace(/^Gamaharia /,""))));
+  let crossedPart=!crossed?"On the way from College":(crossed.n==="Gamaharia Campus"?"Reached Gamaharia Campus":("Crossed "+esc(crossed.n.replace(/^Gamaharia /,""))));
+  // When the bus has a fresh GPS fix, completion and the crossed stop
+  // follow the fix's along-route progress instead of the clock, so the
+  // line cannot claim the trip is complete while the bus is still on
+  // its way. With no fresh fix the clock values above stand as-is.
+  const prog=liveProgressFor(route,state.stopName);
+  if(prog){
+    const gpsDone=prog.along>=prog.totalKm-0.15;
+    let gpsCrossed=null;
+    prog.stops.forEach(function(s){
+      if(s.lat===null||s.lon===null) return;
+      const a=vertexAlongKm(prog.linePts,prog.cum,s.lat,s.lon,canon(s.n)===canon("Gamaharia Campus"));
+      if(a!==null&&a<=prog.along+0.15) gpsCrossed=s;
+    });
+    crossedPart=!gpsCrossed?"On the way from College":(gpsCrossed.n==="Gamaharia Campus"?"Reached Gamaharia Campus":("Crossed "+esc(gpsCrossed.n.replace(/^Gamaharia /,""))));
+    if(gpsDone) statusTxt="Trip complete";
+    else if(statusTxt==="Trip complete"||statusTxt==="Not started yet") statusTxt="En route — live GPS";
+  }
   $("statusLine").innerHTML=etaPart+" · "+crossedPart+" · "+(statusTxt==="On time"?'<span class="ok">On time</span>':esc(statusTxt));
   // "Your earliest bus" — the student's main answer: across ALL routes
   // serving this stop in this trip, the first bus they can board, using
@@ -3072,9 +3059,8 @@ function driverBusPosition(route){
 // baked geometry exactly as liveProgressFor does it (routeLine,
 // cumDistKm, scheduleAlongKm as the preferAlong prior, projectAlongPath
 // with the fix's heading), and each stop's along-route position decides
-// reached/next. The student gpsOverrideOpen / PRED_GRACE_MIN cap is
-// deliberately NOT applied here: the driver's own progression is not a
-// student prediction. Stops without confirmed coordinates take an
+// reached/next. The driver's own progression follows the fresh fix in
+// all trip states: it is not a student prediction. Stops without confirmed coordinates take an
 // along position interpolated between the nearest coordinate-bearing
 // neighbours in stop order (the nearest one's along when neighbours
 // exist on one side only). Null when off duty, when there is no fresh
